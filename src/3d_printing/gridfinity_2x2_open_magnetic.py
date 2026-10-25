@@ -7,16 +7,20 @@ NOTE: This is a customizable open frame, not a validated Gridfinity seating prof
 from pathlib import Path
 import cadquery as cq
 
+                 # Outer border and cross bars, mm
+MAGNETS = True
+MAGNET_DIAMETER = 3.0
+MAGNET_DEPTH = 1.0
+MAGNET_CLEARANCE = 0.2        # Diameter clearance, mm
+MAGNET_DEPTH_PLUS_GLUE = MAGNET_DEPTH + .3           # For Nmm-thick magnets and glue
+MAGNETS_PER_SIDE = 2         # One at each cell center for 2x2
+
+
 GRID_X = 2
 GRID_Y = 2
 PITCH = 42.0                 # Gridfinity cell pitch, mm
-HEIGHT = 8.0                 # Needed for horizontal 6mm magnet pockets
-WALL = 5.0                   # Outer border and cross bars, mm
-MAGNETS = True
-MAGNET_DIAMETER = 6.0
-MAGNET_CLEARANCE = 0.2        # Diameter clearance, mm
-MAGNET_DEPTH = 2.3           # For 2mm-thick magnets and glue
-MAGNETS_PER_SIDE = 2         # One at each cell center for 2x2
+HEIGHT = MAGNET_DIAMETER + 2 # Needed for horizontal 6mm magnet pockets
+WALL = 5.0  
 
 
 def make_plate():
@@ -36,14 +40,14 @@ def make_plate():
 
     if MAGNETS:
         radius = (MAGNET_DIAMETER + MAGNET_CLEARANCE)/2
-        if HEIGHT <= 2 * radius or WALL <= MAGNET_DEPTH:
+        if HEIGHT <= 2 * radius or WALL <= MAGNET_DEPTH_PLUS_GLUE:
             raise ValueError('Increase HEIGHT or WALL to accommodate magnet pockets')
         # Blind horizontal holes from all four outside edges.
         for i in range(GRID_X):
             x = -width/2 + (i + 0.5) * PITCH
             for y, direction in ((-length/2, (0, 1, 0)),
                                  ( length/2, (0,-1, 0))):
-                pocket = cq.Solid.makeCylinder(radius, MAGNET_DEPTH,
+                pocket = cq.Solid.makeCylinder(radius, MAGNET_DEPTH_PLUS_GLUE,
                                                 cq.Vector(x, y, HEIGHT/2),
                                                 cq.Vector(*direction))
                 model = model.cut(pocket)
@@ -51,7 +55,7 @@ def make_plate():
             y = -length/2 + (j + 0.5) * PITCH
             for x, direction in ((-width/2, (1, 0, 0)),
                                  ( width/2, (-1,0, 0))):
-                pocket = cq.Solid.makeCylinder(radius, MAGNET_DEPTH,
+                pocket = cq.Solid.makeCylinder(radius, MAGNET_DEPTH_PLUS_GLUE,
                                                 cq.Vector(x, y, HEIGHT/2),
                                                 cq.Vector(*direction))
                 model = model.cut(pocket)
@@ -61,6 +65,9 @@ def make_plate():
 if __name__ == '__main__':
     plate = make_plate()
     root = Path(__file__).resolve().parent
-    cq.exporters.export(plate, str(root / 'gridfinity_2x2_open_magnetic.stl'), tolerance=0.05, angularTolerance=0.15)
-    cq.exporters.export(plate, str(root / 'gridfinity_2x2_open_magnetic.step'))
+    
+
+    file_name = f"gridfinity_{GRID_X}x{GRID_Y}_open_magnetic_mag_{MAGNET_DIAMETER}x{MAGNET_DEPTH}"
+    cq.exporters.export(plate, str(root / f'{file_name}.stl'), tolerance=0.05, angularTolerance=0.15)
+    cq.exporters.export(plate, str(root / f'{file_name}.step'))
     print('Exported STL and STEP to', root)
