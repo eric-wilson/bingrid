@@ -13,8 +13,18 @@ from dataclasses import dataclass
 class MagnetConfig:
     """Horizontal magnet-pocket parameters.
 
-    Pockets are blind cylinders drilled inward from the outer edges so magnets
-    sit flush against neighbouring tiles.
+    Two mount orientations are supported:
+
+    * ``horizontal`` (default) drills blind pockets inward from the outer edges,
+      so magnets pull tiles together edge-to-edge. Horizontal holes print as an
+      overhang and tend to sag at the top (the hole comes out oval), so the
+      default pocket ``shape`` is ``teardrop``: a circle with a ~45 deg pointed
+      roof that prints without support while the round lower part still seats
+      the magnet.
+    * ``vertical`` drills pockets up into the bottom face (axis along Z). These
+      print perfectly round (each layer is a flat circle) and match the
+      Gridfinity convention of magnets in the base; use them to hold a plate
+      down to a surface or to a baseplate below.
     """
 
     enabled: bool = True
@@ -22,6 +32,9 @@ class MagnetConfig:
     depth: float = 1.0           # Nominal magnet depth, mm
     clearance: float = 0.2       # Added to diameter for a slip fit, mm
     glue_gap: float = 0.3        # Extra pocket depth for glue, mm
+    orientation: str = "horizontal"  # 'horizontal' (edge) or 'vertical' (bottom)
+    shape: str = "teardrop"      # 'teardrop' (print-safe) or 'round'
+    teardrop_angle_deg: float = 45.0  # Roof half-angle for the teardrop peak
 
     def __post_init__(self) -> None:
         if self.diameter <= 0:
@@ -32,6 +45,12 @@ class MagnetConfig:
             raise ValueError("magnet clearance cannot be negative")
         if self.glue_gap < 0:
             raise ValueError("magnet glue gap cannot be negative")
+        if self.orientation not in ("horizontal", "vertical"):
+            raise ValueError("magnet orientation must be 'horizontal' or 'vertical'")
+        if self.shape not in ("teardrop", "round"):
+            raise ValueError("magnet shape must be 'teardrop' or 'round'")
+        if not 0 < self.teardrop_angle_deg < 90:
+            raise ValueError("teardrop angle must be in (0, 90) degrees")
 
     @property
     def bore_radius(self) -> float:
@@ -42,6 +61,19 @@ class MagnetConfig:
     def pocket_depth(self) -> float:
         """How deep the pocket is drilled (magnet depth + glue allowance)."""
         return self.depth + self.glue_gap
+
+    @property
+    def teardrop_peak(self) -> float:
+        """Extra radial reach of the teardrop point beyond the bore radius, mm.
+
+        The peak sits at the apex where the two 45 deg (by default) roof lines
+        meet above the circle. For a roof half-angle ``a`` measured from the
+        vertical the apex is ``r / sin(a)`` from the center, so the extra reach
+        beyond the plain radius is ``r * (1/sin(a) - 1)``.
+        """
+        import math
+
+        return self.bore_radius * (1.0 / math.sin(math.radians(self.teardrop_angle_deg)) - 1.0)
 
 
 @dataclass(frozen=True)
@@ -187,16 +219,36 @@ class GridConfig:
 
         # Cross-feature validation: pockets must physically fit.
         if self.magnet.enabled:
-            if self.resolved_height <= 2 * self.magnet.bore_radius:
-                raise ValueError(
-                    "height too small for magnet pockets; increase height or "
-                    "shrink the magnet"
-                )
-            if self.wall <= self.magnet.pocket_depth:
-                raise ValueError(
-                    "wall too thin for magnet pockets; increase wall or shrink "
-                    "the magnet"
-                )
+            m = self.magnet
+            if m.orientation == "horizontal":
+                # The hole's full diameter (plus the teardrop peak) must fit in
+                # the plate height, and the pocket must not break through the wall.
+                needed_height = 2 * m.bore_radius
+                if m.shape == "teardrop":
+                    needed_height += m.teardrop_peak
+                if self.resolved_height <= needed_height:
+                    raise ValueError(
+                        "height too small for horizontal magnet pockets; "
+                        "increase height or shrink the magnet"
+                    )
+                if self.wall <= m.pocket_depth:
+                    raise ValueError(
+                        "wall too thin for magnet pockets; increase wall or "
+                        "shrink the magnet"
+                    )
+            else:  # vertical (bottom-face) pockets
+                # Drilled up from the bottom: must fit under the floor+profile
+                # and leave material, and fit within a cell footprint.
+                if m.pocket_depth >= self.resolved_height:
+                    raise ValueError(
+                        "vertical magnet pocket deeper than the plate; increase "
+                        "height or shrink the magnet depth"
+                    )
+                if 2 * m.bore_radius >= self.pitch - self.wall:
+                    raise ValueError(
+                        "vertical magnet too wide for the cell; shrink the "
+                        "magnet or increase pitch"
+                    )
 
         if self.opening_style == "socket":
             # The socket profile (plus floor) must fit within the plate height.
@@ -231,8 +283,8 @@ class GridConfig:
         """Plate height, auto-sized when ``height`` is unset.
 
         Auto-sizing takes the largest of: the socket profile height (when used),
-        the room needed for horizontal magnet pockets, and a sensible floor, so
-        the default plate always fully contains its features.
+        the room needed for the magnet pockets, and a sensible floor, so the
+        default plate always fully contains its features.
         """
         if self.height is not None:
             return self.height
@@ -241,7 +293,15 @@ class GridConfig:
         if self.opening_style == "socket":
             candidates.append(self.profile.total_height + self.floor)
         if self.magnet.enabled:
-            candidates.append(self.magnet.diameter + 2.0)
+            if self.magnet.orientation == "horizontal":
+                # Enough height to contain the hole diameter (+ teardrop peak).
+                need = 2 * self.magnet.bore_radius
+                if self.magnet.shape == "teardrop":
+                    need += self.magnet.teardrop_peak
+                candidates.append(need + 2.0)
+            else:
+                # Pocket drilled up from the bottom, plus a little material over it.
+                candidates.append(self.magnet.pocket_depth + self.floor + 1.0)
         candidates.append(10.0 if self.opening_style != "socket" else 0.0)
         return max(candidates)
 

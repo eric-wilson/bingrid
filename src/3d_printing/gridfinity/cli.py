@@ -103,6 +103,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--magnet-glue-gap", type=float, default=0.3,
         help="extra pocket depth for glue, mm (default: 0.3)",
     )
+    magnet.add_argument(
+        "--magnet-orientation", choices=["horizontal", "vertical"],
+        default="horizontal",
+        help="pocket mount: 'horizontal' = edge, 'vertical' = bottom face "
+             "(default: horizontal)",
+    )
+    magnet.add_argument(
+        "--magnet-shape", choices=["teardrop", "round"], default="teardrop",
+        help="horizontal pocket shape: 'teardrop' prints round-bored without "
+             "support, 'round' is a plain cylinder (default: teardrop)",
+    )
+    magnet.add_argument(
+        "--magnet-teardrop-angle", type=float, default=45.0,
+        help="teardrop roof half-angle in degrees (default: 45)",
+    )
     parser.set_defaults(magnets=True)
 
     connector = parser.add_argument_group("connectors")
@@ -163,6 +178,9 @@ def config_from_args(args: argparse.Namespace) -> GridConfig:
             depth=args.magnet_depth,
             clearance=args.magnet_clearance,
             glue_gap=args.magnet_glue_gap,
+            orientation=args.magnet_orientation,
+            shape=args.magnet_shape,
+            teardrop_angle_deg=args.magnet_teardrop_angle,
         ),
         taper=TaperConfig(angle_deg=args.taper_angle),
         connector=ConnectorConfig(

@@ -36,6 +36,10 @@ class ModelExporter:
             name += f"_taper{config.taper.angle_deg}"
         if config.magnet.enabled:
             name += f"_mag_{config.magnet.diameter}x{config.magnet.depth}"
+            if config.magnet.orientation == "vertical":
+                name += "_vmag"
+            elif config.magnet.shape == "round":
+                name += "_round"
         if config.connector.enabled:
             name += "_connect"
         return name

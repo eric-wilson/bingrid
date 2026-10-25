@@ -25,21 +25,49 @@ def test_cell_centers_spacing_equals_pitch(geometry_mod, config_mod):
     assert xs[1] - xs[0] == pytest.approx(42.0)
 
 
-def test_magnet_placements_one_per_edge_cell(geometry_mod, config_mod):
+def test_horizontal_magnet_placements_one_per_edge_cell(geometry_mod, config_mod):
     cfg = config_mod.GridConfig(grid_x=3, grid_y=2)
-    placements = geometry_mod.MagnetPocketFeature._pocket_placements(cfg)
+    placements = geometry_mod.MagnetPocketFeature._horizontal_placements(cfg)
     # Two X-edges * grid_x + two Y-edges * grid_y = 2*3 + 2*2 = 10
     assert len(placements) == 2 * cfg.grid_x + 2 * cfg.grid_y == 10
 
 
-def test_magnet_placements_point_inward(geometry_mod, config_mod):
+def test_horizontal_magnet_placements_point_inward(geometry_mod, config_mod):
     cfg = config_mod.GridConfig(grid_x=1, grid_y=1)
-    placements = geometry_mod.MagnetPocketFeature._pocket_placements(cfg)
+    placements = geometry_mod.MagnetPocketFeature._horizontal_placements(cfg)
     for (ox, oy, oz), (dx, dy, dz) in placements:
         # Direction is a unit axis vector.
         assert abs(dx) + abs(dy) + abs(dz) == pytest.approx(1.0)
         # Z of every pocket is at mid-height.
         assert oz == pytest.approx(cfg.resolved_height / 2)
+
+
+def test_vertical_magnet_placements_four_per_cell_in_material(
+    geometry_mod, config_mod
+):
+    cfg = config_mod.GridConfig(
+        grid_x=2, grid_y=2, floor=2.0,
+        magnet=config_mod.MagnetConfig(orientation="vertical"),
+    )
+    placements = geometry_mod.MagnetPocketFeature._vertical_placements(cfg)
+    assert len(placements) == 4 * cfg.grid_x * cfg.grid_y  # 4 per cell
+
+    # Each pocket must sit in solid border, i.e. its bore must not fall inside
+    # a cell's open area (|offset from the nearest cell center| keeps the bore
+    # clear of the opening half-width).
+    half_open = (cfg.pitch - cfg.wall) / 2
+    r = cfg.magnet.bore_radius
+    for (px, py) in placements:
+        # distance from nearest cell center along each axis
+        import math
+        # nearest cell center grid
+        cxs = [-cfg.width / 2 + (i + 0.5) * cfg.pitch for i in range(cfg.grid_x)]
+        cys = [-cfg.length / 2 + (j + 0.5) * cfg.pitch for j in range(cfg.grid_y)]
+        ncx = min(cxs, key=lambda c: abs(c - px))
+        ncy = min(cys, key=lambda c: abs(c - py))
+        # at least one axis offset must clear the opening (bore in the wall)
+        clears = (abs(px - ncx) + r >= half_open) or (abs(py - ncy) + r >= half_open)
+        assert clears
 
 
 def test_feature_pipeline_default_includes_connector(geometry_mod, config_mod):

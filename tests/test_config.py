@@ -28,11 +28,30 @@ def test_magnet_pocket_depth_includes_glue(config_mod):
         {"depth": 0},
         {"clearance": -0.1},
         {"glue_gap": -0.1},
+        {"orientation": "sideways"},
+        {"shape": "square"},
+        {"teardrop_angle_deg": 0},
+        {"teardrop_angle_deg": 90},
     ],
 )
 def test_magnet_rejects_bad_values(config_mod, kwargs):
     with pytest.raises(ValueError):
         config_mod.MagnetConfig(**kwargs)
+
+
+def test_magnet_defaults_are_horizontal_teardrop(config_mod):
+    m = config_mod.MagnetConfig()
+    assert m.orientation == "horizontal"
+    assert m.shape == "teardrop"
+
+
+def test_magnet_teardrop_peak_at_45_degrees(config_mod):
+    import math
+
+    m = config_mod.MagnetConfig(diameter=3.0, clearance=0.2, teardrop_angle_deg=45.0)
+    expected = m.bore_radius * (1.0 / math.sin(math.radians(45.0)) - 1.0)
+    assert m.teardrop_peak == pytest.approx(expected)
+    assert m.teardrop_peak > 0  # a real peak above the circle
 
 
 # --- TaperConfig -----------------------------------------------------------
@@ -120,9 +139,32 @@ def test_grid_dimensions_and_derived_sizes(config_mod):
     assert cfg.length == pytest.approx(84.0)
 
 
-def test_resolved_height_autofits_magnet_when_unset(config_mod):
-    cfg = config_mod.GridConfig(magnet=config_mod.MagnetConfig(diameter=3.0))
-    assert cfg.resolved_height == pytest.approx(5.0)  # diameter + 2
+def test_resolved_height_autofits_round_magnet_when_unset(config_mod):
+    # Round horizontal pocket: a large magnet drives the auto height to the
+    # bore diameter plus margin (above the legacy 10 mm taper floor).
+    cfg = config_mod.GridConfig(
+        opening_style="taper",
+        magnet=config_mod.MagnetConfig(diameter=12.0, shape="round"),
+    )
+    assert cfg.resolved_height == pytest.approx(2 * cfg.magnet.bore_radius + 2.0)
+
+
+def test_resolved_height_autofits_teardrop_magnet_when_unset(config_mod):
+    # Teardrop pocket needs extra room for the roof peak.
+    cfg = config_mod.GridConfig(
+        opening_style="taper",
+        magnet=config_mod.MagnetConfig(diameter=12.0, shape="teardrop"),
+    )
+    m = cfg.magnet
+    assert cfg.resolved_height == pytest.approx(
+        2 * m.bore_radius + m.teardrop_peak + 2.0
+    )
+    # And the teardrop reserves strictly more height than a round bore.
+    round_cfg = config_mod.GridConfig(
+        opening_style="taper",
+        magnet=config_mod.MagnetConfig(diameter=12.0, shape="round"),
+    )
+    assert cfg.resolved_height > round_cfg.resolved_height
 
 
 def test_resolved_height_respects_explicit_value(config_mod):
@@ -235,6 +277,26 @@ def test_grid_floor_adds_to_autosized_height(config_mod):
         floor=2.0, magnet=config_mod.MagnetConfig(enabled=False)
     )
     assert cfg.resolved_height == pytest.approx(cfg.profile.total_height + 2.0)
+
+
+def test_grid_rejects_vertical_magnet_deeper_than_plate(config_mod):
+    with pytest.raises(ValueError, match="vertical magnet pocket deeper"):
+        config_mod.GridConfig(
+            grid_x=2, grid_y=2, height=3.0, floor=1.0,
+            opening_style="taper",
+            magnet=config_mod.MagnetConfig(
+                orientation="vertical", depth=3.0, glue_gap=0.3
+            ),
+        )
+
+
+def test_grid_accepts_vertical_magnet_with_floor(config_mod):
+    # Should construct without error.
+    cfg = config_mod.GridConfig(
+        grid_x=2, grid_y=2, floor=2.0,
+        magnet=config_mod.MagnetConfig(orientation="vertical"),
+    )
+    assert cfg.magnet.orientation == "vertical"
 
 
 def test_grid_rejects_connector_wider_than_edge(config_mod):

@@ -182,17 +182,33 @@ class CellOpeningFeature(PlateFeature):
 
 
 class MagnetPocketFeature(PlateFeature):
-    """Blind horizontal magnet pockets drilled inward from all four edges."""
+    """Magnet pockets, horizontal (edge) or vertical (bottom face).
+
+    Horizontal pockets are drilled inward from the four outer edges so magnets
+    pull neighbouring tiles together. Because a horizontal hole is an overhang,
+    it prints oval unless shaped: the default ``teardrop`` shape adds a pointed
+    roof (a printable overhang) above the circle so the bore stays round where
+    the magnet seats. A ``round`` shape is available for comparison.
+
+    Vertical pockets are drilled up into the bottom face (axis along Z); each
+    layer is a flat circle, so they print perfectly round with no overhang.
+    """
 
     def apply(self, model: cq.Workplane, config: GridConfig) -> cq.Workplane:
         if not config.magnet.enabled:
             return model
-        for origin, direction in self._pocket_placements(config):
-            model = model.cut(self._pocket(origin, direction, config))
+        if config.magnet.orientation == "horizontal":
+            for origin, direction in self._horizontal_placements(config):
+                model = model.cut(self._horizontal_pocket(origin, direction, config))
+        else:
+            for cx, cy in self._vertical_placements(config):
+                model = model.cut(self._vertical_pocket(cx, cy, config))
         return model
 
+    # --- horizontal (edge) pockets ----------------------------------------
+
     @staticmethod
-    def _pocket_placements(
+    def _horizontal_placements(
         config: GridConfig,
     ) -> List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]]:
         """One placement per edge cell, on each of the four outer edges.
@@ -221,17 +237,91 @@ class MagnetPocketFeature(PlateFeature):
 
         return placements
 
-    @staticmethod
-    def _pocket(
+    @classmethod
+    def _horizontal_pocket(
+        cls,
         origin: Tuple[float, float, float],
         direction: Tuple[float, float, float],
         config: GridConfig,
     ) -> cq.Solid:
-        return cq.Solid.makeCylinder(
-            config.magnet.bore_radius,
-            config.magnet.pocket_depth,
+        m = config.magnet
+        cylinder = cq.Solid.makeCylinder(
+            m.bore_radius,
+            m.pocket_depth,
             cq.Vector(*origin),
             cq.Vector(*direction),
+        )
+        if m.shape != "teardrop":
+            return cylinder
+        return cylinder.fuse(cls._teardrop_roof(origin, direction, config))
+
+    @staticmethod
+    def _teardrop_roof(
+        origin: Tuple[float, float, float],
+        direction: Tuple[float, float, float],
+        config: GridConfig,
+    ) -> cq.Solid:
+        """A wedge above the bore whose apex points up (+Z).
+
+        The roof is a triangular prism extruded along the pocket axis. Its base
+        spans the bore diameter at the circle's horizontal mid-line and rises to
+        a point above, so the printed overhang never exceeds the teardrop angle.
+        """
+        m = config.magnet
+        r = m.bore_radius
+        peak = r + m.teardrop_peak  # apex height above the bore center
+        ox, oy, oz = origin
+        dx, dy, dz = direction
+
+        # Cross-section triangle in the plane perpendicular to the axis, defined
+        # in (horizontal-tangent u, vertical z). Base at z=0 across the diameter,
+        # apex at z=peak. The axis is horizontal, so u is the in-plane horizontal
+        # tangent: perpendicular to both the axis and world Z.
+        ux, uy = -dy, dx  # horizontal tangent (axis is in XY, so this is in XY)
+
+        def pt(u: float, z: float) -> cq.Vector:
+            return cq.Vector(ox + ux * u, oy + uy * u, oz + z)
+
+        tri = [pt(-r, 0.0), pt(r, 0.0), pt(0.0, peak)]
+        wire = cq.Wire.makePolygon(tri + [tri[0]])
+        face = cq.Face.makeFromWires(wire)
+        return cq.Solid.extrudeLinear(
+            face, cq.Vector(dx, dy, dz) * m.pocket_depth
+        )
+
+    # --- vertical (bottom-face) pockets -----------------------------------
+
+    @staticmethod
+    def _vertical_placements(config: GridConfig) -> List[Tuple[float, float]]:
+        """Pockets in the solid crossbars, offset from each cell center.
+
+        A vertical pocket must land in material, not in a cell opening. We place
+        four per cell, offset toward the cell corners by ``corner_offset`` so
+        they sit in the crossbar/rim walls that surround each opening. This
+        mirrors the Gridfinity convention of magnets near the base corners.
+        """
+        # Offset from a cell center to its magnet ring: just inside the wall so
+        # the bore stays within the solid border around the opening.
+        half_open = (config.pitch - config.wall) / 2
+        offset = half_open + config.wall / 2 - config.magnet.bore_radius - 0.5
+        offset = max(offset, 0.0)
+
+        placements: List[Tuple[float, float]] = []
+        for _i, _j, cx, cy in _cell_centers(config):
+            for sx in (-1, 1):
+                for sy in (-1, 1):
+                    placements.append((cx + sx * offset, cy + sy * offset))
+        return placements
+
+    @staticmethod
+    def _vertical_pocket(cx: float, cy: float, config: GridConfig) -> cq.Solid:
+        m = config.magnet
+        # Drill up from z=0 (bottom face) by the pocket depth.
+        return cq.Solid.makeCylinder(
+            m.bore_radius,
+            m.pocket_depth,
+            cq.Vector(cx, cy, 0.0),
+            cq.Vector(0, 0, 1),
         )
 
 

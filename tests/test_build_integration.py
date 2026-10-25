@@ -105,6 +105,43 @@ def test_socket_profile_matches_bgg_reference(gridfinity):
         assert med_open(ours, 4.9) == pytest.approx(med_open(bgg, 4.9), abs=0.5)   # mouth
 
 
+def test_teardrop_magnet_roof_points_up(gridfinity):
+    """A horizontal teardrop pocket must reach higher above its axis than below,
+    so the roof is a printable overhang (the fix for oval magnet holes)."""
+    from importlib import import_module
+
+    geom = import_module("3d_printing.gridfinity.geometry")
+    cfg = gridfinity.GridConfig(grid_x=1, grid_y=1, height=6.0)
+    mpf = geom.MagnetPocketFeature()
+
+    z0 = 3.0
+    pocket = mpf._horizontal_pocket((0.0, -21.0, z0), (0.0, 1.0, 0.0), cfg)
+    bb = pocket.BoundingBox()
+    above = bb.zmax - z0
+    below = z0 - bb.zmin
+    assert above > below  # roof points up
+    assert (above - below) == pytest.approx(cfg.magnet.teardrop_peak, abs=1e-6)
+
+
+def test_teardrop_plate_is_watertight(gridfinity):
+    _cfg, model = _build(gridfinity, grid_x=2, grid_y=2, height=6.0)
+    assert model.val().isValid()
+
+
+def test_vertical_magnet_plate_is_watertight(gridfinity):
+    cfg, model = _build(
+        gridfinity,
+        grid_x=2,
+        grid_y=2,
+        floor=2.0,
+        magnet=gridfinity.MagnetConfig(orientation="vertical"),
+    )
+    assert model.val().isValid()
+    # Bottom-drilled pockets start at the base (z=0).
+    bb = model.val().BoundingBox()
+    assert bb.zmin == pytest.approx(0.0, abs=1e-6)
+
+
 def test_connector_tab_projects_past_edge(gridfinity):
     cfg, model = _build(
         gridfinity,

@@ -16,8 +16,9 @@ correctly and plates stay compatible when tiled together at any grid size.
   A legacy simple-taper style is also available.
 - **Open floor by default, optional floor** — openings punch through by default;
   add `--floor <mm>` for a solid base.
-- **Side magnet pockets** — blind horizontal pockets drilled from the outer edges,
-  sized for your magnets with clearance and a glue allowance.
+- **Magnet pockets** — horizontal (edge) or vertical (bottom-face) mounts.
+  Horizontal pockets default to a teardrop shape so they print round instead of
+  oval; vertical pockets print perfectly round.
 - **Dovetail connectors** — optional tabs and slots on the outer edges so frames
   tile together; push two frames edge-to-edge and the tab seats into the slot.
 - **STL + STEP export** with config-derived file names.
@@ -71,6 +72,12 @@ python -m 3d_printing.gridfinity.cli --magnet-diameter 6 --magnet-depth 2 --wall
 
 # Tileable frames with dovetail connectors
 python -m 3d_printing.gridfinity.cli --x 2 --y 2 --connectors
+
+# Vertical (bottom-face) magnets instead of edge magnets (needs a floor)
+python -m 3d_printing.gridfinity.cli --magnet-orientation vertical --floor 2
+
+# Plain round horizontal pockets instead of teardrop
+python -m 3d_printing.gridfinity.cli --magnet-shape round
 ```
 
 Output is written to `.output/` by default (override with `--output-dir`), with
@@ -98,6 +105,9 @@ a name derived from the configuration, e.g.
 | `--magnet-depth` | `1.0` | Magnet depth (mm) |
 | `--magnet-clearance` | `0.2` | Added to diameter for fit (mm) |
 | `--magnet-glue-gap` | `0.3` | Extra pocket depth for glue (mm) |
+| `--magnet-orientation` | `horizontal` | `horizontal` (edge) or `vertical` (bottom face) |
+| `--magnet-shape` | `teardrop` | Horizontal pocket shape: `teardrop` (print-safe) or `round` |
+| `--magnet-teardrop-angle` | `45.0` | Teardrop roof half-angle (degrees) |
 | `--connectors` | off | Add dovetail connectors for tiling frames |
 | `--connector-width` | `8.0` | Dovetail mouth width (mm) |
 | `--connector-depth` | `4.0` | Dovetail depth (mm); must be `< wall` |
@@ -128,6 +138,32 @@ The defaults were measured from `samples/BGG V1.0.0 standard.stl.stl` and are
 verified against it by an integration test. Because the outer footprint stays
 flush at `pitch × cells`, tiled plates line up on the 42 mm grid and a bin
 spanning a seam still seats.
+
+## Magnet pockets and printing round holes
+
+Magnets can mount two ways:
+
+- **Horizontal** (default) — blind pockets drilled inward from the four outer
+  edges, so magnets pull neighbouring frames together edge-to-edge.
+- **Vertical** (`--magnet-orientation vertical`) — pockets drilled up into the
+  bottom face, matching the Gridfinity convention of magnets near the base.
+  Requires a floor (`--floor`) to seat into.
+
+A horizontal hole is printed as an overhang: the top of the circle is
+unsupported and sags, so the bore comes out oval ("smushed") and a magnet may
+not fit. Two things address this:
+
+1. **Teardrop shape (default).** The pocket gets a pointed roof at
+   `--magnet-teardrop-angle` (45° by default). The sloped roof is a printable
+   overhang, so nothing sags and the round lower part still seats the magnet.
+   Use `--magnet-shape round` to get a plain cylinder instead.
+2. **Vertical mount.** Bottom-face pockets print as flat circles on each layer,
+   so they stay perfectly round with no overhang — the most robust option.
+
+Print-side tips (no design change) that also help: enable your slicer's **hole
+horizontal expansion** (Bambu Studio: Quality → Precision), slow down and cool
+the bridging layers, orient the part so holes point up where practical, or ream
+the hole to size after printing as a fallback.
 
 ## Connectors
 
