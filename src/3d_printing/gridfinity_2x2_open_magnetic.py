@@ -1,73 +1,40 @@
-"""Parametric open-bottom Gridfinity-style 2x2 frame with side magnet pockets.
-Run: python gridfinity_2x2_open_magnetic.py
-Requires: cadquery (pip install cadquery)
-Outputs: STL and STEP alongside this script.
-NOTE: This is a customizable open frame, not a validated Gridfinity seating profile.
+"""Backward-compatible entry point for the original 2x2 magnetic frame.
+
+The real, configurable implementation now lives in the ``gridfinity`` package.
+This shim preserves the old behaviour and run command:
+
+    python gridfinity_2x2_open_magnetic.py
+
+For full configurability (grid size, magnets, taper), prefer the CLI:
+
+    python -m 3d_printing.gridfinity.cli --help
 """
 from pathlib import Path
-import cadquery as cq
 
-                 # Outer border and cross bars, mm
-MAGNETS = True
-MAGNET_DIAMETER = 3.0
-MAGNET_DEPTH = 1.0
-MAGNET_CLEARANCE = 0.2        # Diameter clearance, mm
-MAGNET_DEPTH_PLUS_GLUE = MAGNET_DEPTH + .3           # For Nmm-thick magnets and glue
-MAGNETS_PER_SIDE = 2         # One at each cell center for 2x2
+try:  # Allow running both as a module and as a loose script.
+    from .gridfinity import GridConfig, GridfinityPlate, MagnetConfig, ModelExporter, TaperConfig
+except ImportError:  # pragma: no cover - script-style execution fallback
+    import sys
 
-
-GRID_X = 2
-GRID_Y = 2
-PITCH = 42.0                 # Gridfinity cell pitch, mm
-HEIGHT = MAGNET_DIAMETER + 2 # Needed for horizontal 6mm magnet pockets
-WALL = 5.0  
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from gridfinity import GridConfig, GridfinityPlate, MagnetConfig, ModelExporter, TaperConfig
 
 
-def make_plate():
-    width = GRID_X * PITCH
-    length = GRID_Y * PITCH
-    model = cq.Workplane('XY').box(width, length, HEIGHT, centered=(True, True, False))
-    # Openings are fully through the plate, leaving the outer rim and crossbars.
-    for i in range(GRID_X):
-        for j in range(GRID_Y):
-            cx = -width/2 + (i + 0.5) * PITCH
-            cy = -length/2 + (j + 0.5) * PITCH
-            opening = (cq.Workplane('XY').center(cx, cy)
-                       .box(PITCH - WALL, PITCH - WALL, HEIGHT + 2,
-                            centered=(True, True, False))
-                       .translate((0, 0, -1)))
-            model = model.cut(opening)
-
-    if MAGNETS:
-        radius = (MAGNET_DIAMETER + MAGNET_CLEARANCE)/2
-        if HEIGHT <= 2 * radius or WALL <= MAGNET_DEPTH_PLUS_GLUE:
-            raise ValueError('Increase HEIGHT or WALL to accommodate magnet pockets')
-        # Blind horizontal holes from all four outside edges.
-        for i in range(GRID_X):
-            x = -width/2 + (i + 0.5) * PITCH
-            for y, direction in ((-length/2, (0, 1, 0)),
-                                 ( length/2, (0,-1, 0))):
-                pocket = cq.Solid.makeCylinder(radius, MAGNET_DEPTH_PLUS_GLUE,
-                                                cq.Vector(x, y, HEIGHT/2),
-                                                cq.Vector(*direction))
-                model = model.cut(pocket)
-        for j in range(GRID_Y):
-            y = -length/2 + (j + 0.5) * PITCH
-            for x, direction in ((-width/2, (1, 0, 0)),
-                                 ( width/2, (-1,0, 0))):
-                pocket = cq.Solid.makeCylinder(radius, MAGNET_DEPTH_PLUS_GLUE,
-                                                cq.Vector(x, y, HEIGHT/2),
-                                                cq.Vector(*direction))
-                model = model.cut(pocket)
-    return model
+def default_config() -> GridConfig:
+    """The original 2x2 open magnetic frame, now with a gentle inner taper."""
+    return GridConfig(
+        grid_x=2,
+        grid_y=2,
+        pitch=42.0,
+        wall=5.0,
+        magnet=MagnetConfig(diameter=3.0, depth=1.0),
+        taper=TaperConfig(angle_deg=2.0),
+    )
 
 
-if __name__ == '__main__':
-    plate = make_plate()
-    root = Path(__file__).resolve().parent
-    
-
-    file_name = f"gridfinity_{GRID_X}x{GRID_Y}_open_magnetic_mag_{MAGNET_DIAMETER}x{MAGNET_DEPTH}"
-    cq.exporters.export(plate, str(root / f'{file_name}.stl'), tolerance=0.05, angularTolerance=0.15)
-    cq.exporters.export(plate, str(root / f'{file_name}.step'))
-    print('Exported STL and STEP to', root)
+if __name__ == "__main__":
+    config = default_config()
+    model = GridfinityPlate(config).build()
+    exporter = ModelExporter(Path(__file__).resolve().parents[2] / ".output")
+    for path in exporter.export(model, config):
+        print("Exported", path)
