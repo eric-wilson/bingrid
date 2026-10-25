@@ -62,47 +62,109 @@ def test_no_magnet_plate_builds(gridfinity):
     assert model.val().isValid()
 
 
-def test_socket_profile_matches_bgg_reference(gridfinity):
-    """A 3x3 socket plate should reproduce the BGG reference dimensions."""
+# Published Gridfinity baseplate socket dimensions (facts, not a third-party
+# file). A 3x3 plate is 126 x 126 mm at 42 mm pitch; the cell socket opening is
+# ~37.5 mm along the vertical, widening to the mouth and narrowing to the foot.
+# We verify our generated mesh against these numbers so the test owns no
+# third-party asset and stays self-contained.
+_GF_PITCH = 42.0
+_GF_CELLS = 3
+_GF_FOOTPRINT = _GF_PITCH * _GF_CELLS          # 126.0 mm
+_GF_VERTICAL_OPENING = 37.5                    # inner opening along the vertical
+
+
+def test_socket_profile_matches_gridfinity_spec(gridfinity):
+    """A 3x3 socket plate reproduces the published Gridfinity baseplate socket.
+
+    Measured against the spec dimensions, not against any third-party file, so
+    the test is self-contained and carries no licensing baggage.
+    """
     import statistics
+    import tempfile
     from importlib import import_module
     from pathlib import Path
 
-    mt = import_module("bingrid.meshtools")
-    sample = (
-        Path(__file__).resolve().parents[1]
-        / "samples" / "BGG V1.0.0 standard.stl.stl"
-    )
-    if not sample.exists():
-        pytest.skip("BGG reference sample not present")
+    import cadquery as cq
 
+    mt = import_module("bingrid.meshtools")
+    cfg = gridfinity.GridConfig(
+        grid_x=_GF_CELLS, grid_y=_GF_CELLS, height=5.0, pitch=_GF_PITCH,
+        magnet=gridfinity.MagnetConfig(enabled=False),
+    )
+    model = gridfinity.GridfinityPlate(cfg).build()
+
+    with tempfile.TemporaryDirectory() as d:
+        ours_path = Path(d) / "ours.stl"
+        cq.exporters.export(model, str(ours_path))
+        ours = mt.MeshInspector.load(ours_path)
+
+        # Footprint and height match the spec (tile compatibility).
+        assert ours.extents[0] == pytest.approx(_GF_FOOTPRINT, abs=0.1)
+        assert ours.extents[1] == pytest.approx(_GF_FOOTPRINT, abs=0.1)
+        assert ours.extents[2] == pytest.approx(5.0, abs=0.05)
+
+        def med_open(z):
+            p = ours.slice_at(z)
+            return statistics.median(w for (w, _l) in p.hole_extents)
+
+        # Nine cells punch through the body.
+        assert ours.slice_at(2.5).hole_count == _GF_CELLS * _GF_CELLS
+
+        # The vertical section seats the bin foot at the spec opening; the
+        # mouth is wider (lead-in) and the foot narrower.
+        vertical = med_open(2.0)
+        mouth = med_open(4.9)
+        foot = med_open(0.1)
+        assert vertical == pytest.approx(_GF_VERTICAL_OPENING, abs=0.3)
+        assert mouth > vertical > foot
+
+
+@pytest.mark.skip(
+    reason="Local-only: compares against a third-party reference file "
+    "(Standard Digital File License) that must not be committed. Drop the "
+    "file in and remove this skip to run it on your own machine."
+)
+def test_socket_profile_matches_local_reference(gridfinity):
+    """Optional local check against a reference STL you supply yourself.
+
+    The reference is NOT distributed with this repo because of its license.
+    Place a file at the path below and remove the ``skip`` marker to compare.
+    """
+    import statistics
+    import tempfile
+    from importlib import import_module
+    from pathlib import Path
+
+    import cadquery as cq
+
+    reference = Path.home() / "gridfinity-references" / "baseplate_3x3.stl"
+    if not reference.exists():
+        pytest.skip(f"reference file not found: {reference}")
+
+    mt = import_module("bingrid.meshtools")
     cfg = gridfinity.GridConfig(
         grid_x=3, grid_y=3, height=5.0,
         magnet=gridfinity.MagnetConfig(enabled=False),
     )
     model = gridfinity.GridfinityPlate(cfg).build()
 
-    import tempfile
-    import cadquery as cq
     with tempfile.TemporaryDirectory() as d:
         ours_path = Path(d) / "ours.stl"
         cq.exporters.export(model, str(ours_path))
         ours = mt.MeshInspector.load(ours_path)
-        bgg = mt.MeshInspector.load(sample)
+        ref = mt.MeshInspector.load(reference)
 
-        # Overall footprint and height must match (tile compatibility).
-        assert ours.extents[0] == pytest.approx(bgg.extents[0], abs=0.1)
-        assert ours.extents[1] == pytest.approx(bgg.extents[1], abs=0.1)
-        assert ours.extents[2] == pytest.approx(bgg.extents[2], abs=0.05)
+        assert ours.extents[0] == pytest.approx(ref.extents[0], abs=0.1)
+        assert ours.extents[1] == pytest.approx(ref.extents[1], abs=0.1)
+        assert ours.extents[2] == pytest.approx(ref.extents[2], abs=0.05)
 
         def med_open(insp, z):
             p = insp.slice_at(z)
             return statistics.median(w for (w, _l) in p.hole_extents)
 
-        # Key seating dimensions must be close (within print tolerance).
-        assert med_open(ours, 0.1) == pytest.approx(med_open(bgg, 0.1), abs=0.3)   # foot
-        assert med_open(ours, 1.5) == pytest.approx(med_open(bgg, 1.5), abs=0.3)   # vertical
-        assert med_open(ours, 4.9) == pytest.approx(med_open(bgg, 4.9), abs=0.5)   # mouth
+        assert med_open(ours, 0.1) == pytest.approx(med_open(ref, 0.1), abs=0.3)
+        assert med_open(ours, 1.5) == pytest.approx(med_open(ref, 1.5), abs=0.3)
+        assert med_open(ours, 4.9) == pytest.approx(med_open(ref, 4.9), abs=0.5)
 
 
 def test_teardrop_magnet_roof_points_up(gridfinity):

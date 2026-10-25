@@ -1,16 +1,11 @@
 """Tests for the reusable mesh inspection tool.
 
-Uses the bundled BGG reference sample when present; otherwise builds a tiny
-mesh in-memory so the core measurements are still exercised.
+All fixtures are built in-memory with trimesh, so the tests own no third-party
+asset and run anywhere.
 """
 from importlib import import_module
-from pathlib import Path
 
 import pytest
-
-SAMPLE = (
-    Path(__file__).resolve().parents[1] / "samples" / "BGG V1.0.0 standard.stl.stl"
-)
 
 
 @pytest.fixture(scope="module")
@@ -54,13 +49,15 @@ def test_slice_reports_hole(meshtools):
     assert prof.hole_extents[0] == pytest.approx((6.0, 6.0), abs=1e-6)
 
 
-@pytest.mark.skipif(not SAMPLE.exists(), reason="BGG sample not present")
-def test_bgg_reference_summary(meshtools):
-    insp = meshtools.MeshInspector.load(SAMPLE)
-    # Known reference: 3x3 baseplate, 126 x 126 x 5 mm.
-    assert insp.extents[0] == pytest.approx(126.0, abs=0.1)
-    assert insp.extents[1] == pytest.approx(126.0, abs=0.1)
-    assert insp.extents[2] == pytest.approx(5.0, abs=0.05)
-    # Nine cells -> nine holes through the body.
-    prof = insp.slice_at(2.0, axis="z")
-    assert prof.hole_count == 9
+def test_profile_sweep_covers_height(meshtools):
+    import trimesh
+
+    box = trimesh.creation.box(extents=(10.0, 10.0, 6.0))
+    insp = meshtools.MeshInspector(box)
+    slices = insp.profile(axis="z", step=1.0)
+    assert len(slices) >= 2
+    # Positions run from the base upward, strictly increasing.
+    positions = [s.position for s in slices]
+    assert positions == sorted(positions)
+    assert positions[0] >= 0.0
+    assert positions[-1] <= 6.0

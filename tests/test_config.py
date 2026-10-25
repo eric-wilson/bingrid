@@ -107,8 +107,8 @@ def test_profile_mouth_wider_than_top_wider_than_bottom(config_mod):
     assert p.mouth_opening > p.top_opening > p.bottom_opening
 
 
-def test_profile_defaults_match_bgg_reference(config_mod):
-    # These defaults reproduce the measured BGG V1.0.0 reference profile.
+def test_profile_defaults_match_gridfinity_spec(config_mod):
+    # Defaults reproduce the published Gridfinity baseplate socket dimensions.
     p = config_mod.GridfinityProfile()
     assert p.top_opening == pytest.approx(37.5)
     assert p.bottom_opening == pytest.approx(34.3)  # 37.5 - 2*1.6
