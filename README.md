@@ -6,8 +6,8 @@ bins that fit into them. Describe the grid you want on the command line and get
 printable STL and STEP files.
 
 The default cell opening reproduces the standard Gridfinity baseplate socket
-profile (measured from the `BGG V1.0.0` reference in `samples/`), so bins seat
-correctly and plates stay compatible when tiled together at any grid size.
+profile, so bins seat correctly and plates stay compatible when tiled together
+at any grid size.
 
 ## Features
 
@@ -135,10 +135,9 @@ a cell wall from the top face downward:
 2. a straight vertical section (`--profile-straight`),
 3. a bottom chamfer (`--profile-chamfer-bottom`) down to the narrow foot.
 
-The defaults were measured from `samples/BGG V1.0.0 standard.stl.stl` and are
-verified against it by an integration test. Because the outer footprint stays
-flush at `pitch × cells`, tiled plates line up on the 42 mm grid and a bin
-spanning a seam still seats.
+The defaults match the standard Gridfinity baseplate profile. Because the outer
+footprint stays flush at `pitch × cells`, tiled plates line up on the 42 mm grid
+and a bin spanning a seam still seats.
 
 ## Magnet pockets and printing round holes
 
@@ -185,11 +184,10 @@ part's dimensions.
 cd src
 
 # Summary of any mesh
-python -m bingrid.meshtools.cli ../samples/"BGG V1.0.0 standard.stl.stl"
+python -m bingrid.meshtools.cli path/to/part.stl
 
 # Cross-section profile sweep along Z
-python -m bingrid.meshtools.cli ../samples/"BGG V1.0.0 standard.stl.stl" \
-    --profile --axis z --step 0.5
+python -m bingrid.meshtools.cli path/to/part.stl --profile --axis z --step 0.5
 ```
 
 From code:
