@@ -100,8 +100,8 @@ class TaperConfig:
 class GridfinityProfile:
     """The standard Gridfinity baseplate socket profile for a cell opening.
 
-    Measured from the ``BGG V1.0.0`` reference and matching the published
-    Gridfinity spec. Reading from the top face downward the cell wall is:
+    Matches the published Gridfinity baseplate spec. Reading from the top face
+    downward the cell wall is:
 
         * ``chamfer_top`` of 45 deg flare (the lead-in mouth),
         * ``straight`` vertical section,
@@ -110,7 +110,7 @@ class GridfinityProfile:
     ``top_opening`` is the inner size at the top of the vertical section (where
     the top chamfer begins); the mouth at the very top face is wider, and the
     bottom of the lower chamfer is narrower, both by the 45 deg run over the
-    chamfer heights. These defaults reproduce the reference part at any grid
+    chamfer heights. These defaults reproduce the standard profile at any grid
     size, so tiled plates stay compatible and bins seat across seams.
     """
 

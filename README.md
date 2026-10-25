@@ -59,7 +59,7 @@ python -m bingrid.cli --help
 # Default 2x2 frame: Gridfinity socket profile, open floor, magnets
 python -m bingrid.cli
 
-# A 3x3 frame matching the BGG reference footprint (126 x 126 x 5 mm)
+# A 3x3 frame matching the standard baseplate footprint (126 x 126 x 5 mm)
 python -m bingrid.cli --x 3 --y 3 --no-magnets --height 5
 
 # Add a 1.2 mm solid floor
@@ -229,7 +229,7 @@ modifying the builder (Open/Closed Principle).
 # Fast tests (pure logic + mesh measurement, no CadQuery render)
 pytest
 
-# Integration tests that build and export solids, incl. the BGG profile match
+# Integration tests that build and export solids, incl. the spec profile match
 pytest -m integration
 ```
 
