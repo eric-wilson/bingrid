@@ -1,23 +1,23 @@
 """Backward-compatible entry point for the original 2x2 magnetic frame.
 
-The real, configurable implementation now lives in the ``gridfinity`` package.
+The real, configurable implementation now lives in the ``bingrid`` package.
 This shim preserves the old behaviour and run command:
 
     python gridfinity_2x2_open_magnetic.py
 
 For full configurability (grid size, magnets, taper), prefer the CLI:
 
-    python -m 3d_printing.gridfinity.cli --help
+    python -m bingrid.cli --help
 """
 from pathlib import Path
 
 try:  # Allow running both as a module and as a loose script.
-    from .gridfinity import GridConfig, GridfinityPlate, MagnetConfig, ModelExporter
+    from . import GridConfig, GridfinityPlate, MagnetConfig, ModelExporter
 except ImportError:  # pragma: no cover - script-style execution fallback
     import sys
 
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from gridfinity import GridConfig, GridfinityPlate, MagnetConfig, ModelExporter
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from bingrid import GridConfig, GridfinityPlate, MagnetConfig, ModelExporter
 
 
 def default_config() -> GridConfig:

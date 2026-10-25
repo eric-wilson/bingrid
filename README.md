@@ -1,8 +1,9 @@
-# 3d-printing
+# bingrid
 
-Parametric, configurable [Gridfinity](https://gridfinity.xyz/)-style frame
-generator built on [CadQuery](https://cadquery.readthedocs.io/). Describe the
-grid you want on the command line and get printable STL and STEP files.
+Parametric, configurable [Gridfinity](https://gridfinity.xyz/)-style grid
+generator built on [CadQuery](https://cadquery.readthedocs.io/) — grids and the
+bins that fit into them. Describe the grid you want on the command line and get
+printable STL and STEP files.
 
 The default cell opening reproduces the standard Gridfinity baseplate socket
 profile (measured from the `BGG V1.0.0` reference in `samples/`), so bins seat
@@ -29,8 +30,8 @@ correctly and plates stay compatible when tiled together at any grid size.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/3d-printing.git
-cd 3d-printing
+git clone https://github.com/yourusername/bingrid.git
+cd bingrid
 
 # Set up the virtual environment (installs dependencies, incl. cadquery)
 ./pysetup.sh
@@ -49,35 +50,35 @@ The generator is driven by a CLI. Run it as a module from the `src` directory
 
 ```bash
 cd src
-python -m 3d_printing.gridfinity.cli --help
+python -m bingrid.cli --help
 ```
 
 ### Examples
 
 ```bash
 # Default 2x2 frame: Gridfinity socket profile, open floor, magnets
-python -m 3d_printing.gridfinity.cli
+python -m bingrid.cli
 
 # A 3x3 frame matching the BGG reference footprint (126 x 126 x 5 mm)
-python -m 3d_printing.gridfinity.cli --x 3 --y 3 --no-magnets --height 5
+python -m bingrid.cli --x 3 --y 3 --no-magnets --height 5
 
 # Add a 1.2 mm solid floor
-python -m 3d_printing.gridfinity.cli --floor 1.2
+python -m bingrid.cli --floor 1.2
 
 # Legacy simple taper instead of the socket profile
-python -m 3d_printing.gridfinity.cli --style taper --taper-angle 2
+python -m bingrid.cli --style taper --taper-angle 2
 
 # Larger magnets and a thicker wall
-python -m 3d_printing.gridfinity.cli --magnet-diameter 6 --magnet-depth 2 --wall 6
+python -m bingrid.cli --magnet-diameter 6 --magnet-depth 2 --wall 6
 
 # Tileable frames with dovetail connectors
-python -m 3d_printing.gridfinity.cli --x 2 --y 2 --connectors
+python -m bingrid.cli --x 2 --y 2 --connectors
 
 # Vertical (bottom-face) magnets instead of edge magnets (needs a floor)
-python -m 3d_printing.gridfinity.cli --magnet-orientation vertical --floor 2
+python -m bingrid.cli --magnet-orientation vertical --floor 2
 
 # Plain round horizontal pockets instead of teardrop
-python -m 3d_printing.gridfinity.cli --magnet-shape round
+python -m bingrid.cli --magnet-shape round
 ```
 
 Output is written to `.output/` by default (override with `--output-dir`), with
@@ -122,7 +123,7 @@ The original entry point still works and now builds the default 2x2 frame with
 the Gridfinity socket profile:
 
 ```bash
-python -m 3d_printing.gridfinity_2x2_open_magnetic
+python -m bingrid.gridfinity_2x2_open_magnetic
 ```
 
 ## The Gridfinity socket profile
@@ -184,20 +185,19 @@ part's dimensions.
 cd src
 
 # Summary of any mesh
-python -m 3d_printing.meshtools.cli ../samples/"BGG V1.0.0 standard.stl.stl"
+python -m bingrid.meshtools.cli ../samples/"BGG V1.0.0 standard.stl.stl"
 
 # Cross-section profile sweep along Z
-python -m 3d_printing.meshtools.cli ../samples/"BGG V1.0.0 standard.stl.stl" \
+python -m bingrid.meshtools.cli ../samples/"BGG V1.0.0 standard.stl.stl" \
     --profile --axis z --step 0.5
 ```
 
 From code:
 
 ```python
-from importlib import import_module
-mt = import_module("3d_printing.meshtools")
+from bingrid.meshtools import MeshInspector
 
-insp = mt.MeshInspector.load("part.stl")
+insp = MeshInspector.load("part.stl")
 print(insp.extents, insp.volume, insp.is_watertight)
 for slice_ in insp.profile(axis="z", step=0.25):
     print(slice_.position, slice_.solid_area, slice_.hole_count)
@@ -208,14 +208,14 @@ for slice_ in insp.profile(axis="z", step=0.25):
 The package follows SOLID/DRY principles with clear responsibility boundaries:
 
 ```
-src/3d_printing/
-├── gridfinity/
-│   ├── config.py     # Validated value objects (GridConfig, GridfinityProfile,
-│   │                 #   MagnetConfig, TaperConfig, ConnectorConfig)
-│   ├── geometry.py   # GridfinityPlate + pluggable PlateFeature classes
-│   │                 #   (CellOpeningFeature, MagnetPocketFeature, ConnectorFeature)
-│   ├── exporter.py   # ModelExporter — STL/STEP output and file naming
-│   └── cli.py        # Argument parsing and composition root
+src/bingrid/
+├── __init__.py       # Public API (GridConfig, GridfinityPlate, ...)
+├── config.py         # Validated value objects (GridConfig, GridfinityProfile,
+│                     #   MagnetConfig, TaperConfig, ConnectorConfig)
+├── geometry.py       # GridfinityPlate + pluggable PlateFeature classes
+│                     #   (CellOpeningFeature, MagnetPocketFeature, ConnectorFeature)
+├── exporter.py       # ModelExporter — STL/STEP output and file naming
+├── cli.py            # Argument parsing and composition root
 └── meshtools/
     ├── inspector.py  # MeshInspector — mesh measurement and profiling
     └── cli.py        # Mesh inspection CLI

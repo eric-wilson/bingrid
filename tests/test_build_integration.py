@@ -68,7 +68,7 @@ def test_socket_profile_matches_bgg_reference(gridfinity):
     from importlib import import_module
     from pathlib import Path
 
-    mt = import_module("3d_printing.meshtools")
+    mt = import_module("bingrid.meshtools")
     sample = (
         Path(__file__).resolve().parents[1]
         / "samples" / "BGG V1.0.0 standard.stl.stl"
@@ -110,7 +110,7 @@ def test_teardrop_magnet_roof_points_up(gridfinity):
     so the roof is a printable overhang (the fix for oval magnet holes)."""
     from importlib import import_module
 
-    geom = import_module("3d_printing.gridfinity.geometry")
+    geom = import_module("bingrid.geometry")
     cfg = gridfinity.GridConfig(grid_x=1, grid_y=1, height=6.0)
     mpf = geom.MagnetPocketFeature()
 

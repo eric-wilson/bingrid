@@ -1,30 +1,35 @@
 """Shared test fixtures.
 
-The distribution package is named ``3d_printing``; it starts with a digit, so
-it cannot be imported with the normal ``import`` statement. Tests import it via
-:func:`importlib.import_module` and receive the module through these fixtures.
-``pyproject.toml`` puts ``src`` on ``pythonpath`` so the import resolves.
+The package is importable as ``bingrid`` (``pyproject.toml`` puts ``src`` on
+``pythonpath``). The config/geometry/exporter/cli modules live at the package
+root after the flatten; ``meshtools`` is a sub-package.
 """
-from importlib import import_module
-
 import pytest
 
 
 @pytest.fixture(scope="session")
 def gridfinity():
-    return import_module("3d_printing.gridfinity")
+    import bingrid
+
+    return bingrid
 
 
 @pytest.fixture(scope="session")
 def config_mod():
-    return import_module("3d_printing.gridfinity.config")
+    import bingrid.config as m
+
+    return m
 
 
 @pytest.fixture(scope="session")
 def geometry_mod():
-    return import_module("3d_printing.gridfinity.geometry")
+    import bingrid.geometry as m
+
+    return m
 
 
 @pytest.fixture(scope="session")
 def cli_mod():
-    return import_module("3d_printing.gridfinity.cli")
+    import bingrid.cli as m
+
+    return m

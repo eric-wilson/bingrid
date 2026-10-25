@@ -5,7 +5,7 @@ and about where output goes, keeping the geometry and config layers reusable
 from code, tests, or a future GUI.
 
 Run:
-    python -m 3d_printing.gridfinity.cli --x 3 --y 2 --taper-angle 2
+    python -m bingrid.cli --x 3 --y 2 --taper-angle 2
 """
 from __future__ import annotations
 

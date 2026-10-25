@@ -1,7 +1,7 @@
 """CLI for inspecting mesh files.
 
-    python -m 3d_printing.meshtools.cli samples/part.stl
-    python -m 3d_printing.meshtools.cli samples/part.stl --profile --axis z --step 0.25
+    python -m bingrid.meshtools.cli samples/part.stl
+    python -m bingrid.meshtools.cli samples/part.stl --profile --axis z --step 0.25
 """
 from __future__ import annotations
 

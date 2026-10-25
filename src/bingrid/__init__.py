@@ -1,9 +1,12 @@
-"""Parametric, configurable Gridfinity-style frame generator.
+"""bingrid — parametric Gridfinity-style grids and the bins that fit them.
 
 Public API:
-    GridConfig, MagnetConfig, TaperConfig, ConnectorConfig  -- parameter objects
-    GridfinityPlate                                         -- builds the solid
-    ModelExporter                                           -- writes STL/STEP
+    GridConfig, MagnetConfig, TaperConfig, GridfinityProfile, ConnectorConfig
+        -- validated parameter/value objects
+    GridfinityPlate  -- builds the CadQuery solid
+    ModelExporter    -- writes STL/STEP
+
+The general-purpose mesh inspection utilities live in ``bingrid.meshtools``.
 """
 from .config import (
     ConnectorConfig,

@@ -15,7 +15,7 @@ SAMPLE = (
 
 @pytest.fixture(scope="module")
 def meshtools():
-    return import_module("3d_printing.meshtools")
+    return import_module("bingrid.meshtools")
 
 
 def test_inspector_box_extents_and_volume(meshtools):
