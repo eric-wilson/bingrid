@@ -42,10 +42,19 @@ def _cell_centers(config: GridConfig) -> Iterator[Tuple[int, int, float, float]]
 
 
 class CellOpeningFeature(PlateFeature):
-    """Cuts a through-opening in each cell, optionally with a draft angle.
+    """Cuts a cell opening in each cell.
 
-    With a non-zero taper the opening is narrower at the bottom and wider at
-    the top, forming a lead-in funnel. With zero taper the walls are straight.
+    Two styles are supported (``config.opening_style``):
+
+    * ``socket`` (default) reproduces the standard Gridfinity baseplate socket
+      measured from the reference part: a 45 deg lead-in chamfer at the mouth,
+      a straight vertical section, then a 45 deg chamfer down to the narrow
+      bottom. This is what lets a bin foot seat and stay compatible across
+      tiled plates.
+    * ``taper`` is the legacy simple full-height draft funnel.
+
+    When ``config.floor`` is 0 the opening punches fully through (open floor);
+    otherwise it stops at the top of the floor, leaving a solid base.
     """
 
     def apply(self, model: cq.Workplane, config: GridConfig) -> cq.Workplane:
@@ -53,39 +62,106 @@ class CellOpeningFeature(PlateFeature):
             model = model.cut(self._opening(cx, cy, config))
         return model
 
+    def _opening(self, cx: float, cy: float, config: GridConfig) -> cq.Workplane:
+        if config.opening_style == "socket":
+            return self._socket_opening(cx, cy, config)
+        return self._taper_opening(cx, cy, config)
+
     @staticmethod
-    def _opening(cx: float, cy: float, config: GridConfig) -> cq.Workplane:
+    def _floor_top(config: GridConfig) -> float:
+        """Z of the cut's lower limit: the top of the floor (0 if open)."""
+        return config.floor
+
+    @classmethod
+    def _socket_opening(
+        cls, cx: float, cy: float, config: GridConfig
+    ) -> cq.Workplane:
+        p = config.profile
         height = config.resolved_height
-        top = config.pitch - config.wall  # Opening size at the top face
+        floor_top = cls._floor_top(config)
 
-        if not config.taper.enabled:
-            # Straight through-cut, slightly over-tall so it punches cleanly.
-            return (
-                cq.Workplane("XY")
-                .center(cx, cy)
-                .box(top, top, height + 2, centered=(True, True, False))
-                .translate((0, 0, -1))
-            )
+        # Build the socket profile top-down. The mouth sits at the top face; the
+        # chamfers/vertical stack downward by their heights. Everything below the
+        # bottom chamfer is cut straight down to the floor (or 1mm past the base
+        # for an open floor) so a bin foot clears and the piece prints cleanly.
+        top_opening = p.top_opening
+        mouth = p.mouth_opening
+        bottom = p.bottom_opening
 
-        # Draft: shrink the bottom so walls lean outward toward the top.
-        inset = 2 * height * math.tan(math.radians(config.taper.angle_deg))
-        bottom = max(top - inset, 0.5)  # Never collapse the bottom to nothing
+        z_mouth = height                      # top face
+        z_vert_top = height - p.chamfer_top    # top of vertical / bottom of mouth chamfer
+        z_vert_bot = z_vert_top - p.straight   # bottom of vertical
+        z_prof_bot = z_vert_bot - p.chamfer_bottom  # bottom of lower chamfer
 
-        # Build a lofted prism from the bottom rectangle up to the top one, then
-        # extend 1 mm past each face so the cut punches fully through.
-        solid = (
-            cq.Workplane("XY")
-            .rect(bottom, bottom)
-            .workplane(offset=height)
-            .rect(top, top)
+        # Lofted socket: bottom (narrow) -> vertical bottom/top (top_opening)
+        #                -> mouth (wide) at the top face.
+        socket = (
+            cq.Workplane("XY").workplane(offset=z_prof_bot).rect(bottom, bottom)
+            .workplane(offset=p.chamfer_bottom).rect(top_opening, top_opening)
+            .workplane(offset=p.straight).rect(top_opening, top_opening)
+            .workplane(offset=p.chamfer_top).rect(mouth, mouth)
             .loft(combine=True)
             .translate((cx, cy, 0))
         )
-        over_bottom = (
+
+        # Straight shaft from the floor top up to the bottom of the socket, at
+        # the socket's narrowest size, so the whole opening is continuous.
+        shaft_bottom = floor_top if config.floor > 0 else -1.0
+        shaft_height = z_prof_bot - shaft_bottom
+        parts = [socket]
+        if shaft_height > 1e-6:
+            shaft = (
+                cq.Workplane("XY")
+                .center(cx, cy)
+                .box(bottom, bottom, shaft_height, centered=(True, True, False))
+                .translate((0, 0, shaft_bottom))
+            )
+            parts.append(shaft)
+
+        # Over-cut 1mm above the top face so the mouth punches cleanly.
+        over_top = (
             cq.Workplane("XY")
             .center(cx, cy)
-            .box(bottom, bottom, 1, centered=(True, True, False))
-            .translate((0, 0, -1))
+            .box(mouth, mouth, 1, centered=(True, True, False))
+            .translate((0, 0, height))
+        )
+        parts.append(over_top)
+
+        result = parts[0]
+        for part in parts[1:]:
+            result = result.union(part)
+        return result
+
+    @staticmethod
+    def _taper_opening(cx: float, cy: float, config: GridConfig) -> cq.Workplane:
+        height = config.resolved_height
+        floor_top = config.floor
+        top = config.pitch - config.wall  # Opening size at the top face
+        span = height - floor_top          # Cut only above the floor
+
+        if not config.taper.enabled:
+            # Straight cut from the floor up, slightly over-tall at the top.
+            box_h = span + 1 + (1 if config.floor == 0 else 0)
+            z0 = floor_top - (1 if config.floor == 0 else 0)
+            return (
+                cq.Workplane("XY")
+                .center(cx, cy)
+                .box(top, top, box_h, centered=(True, True, False))
+                .translate((0, 0, z0))
+            )
+
+        # Draft: shrink the bottom so walls lean outward toward the top.
+        inset = 2 * span * math.tan(math.radians(config.taper.angle_deg))
+        bottom = max(top - inset, 0.5)  # Never collapse the bottom to nothing
+
+        solid = (
+            cq.Workplane("XY")
+            .workplane(offset=floor_top)
+            .rect(bottom, bottom)
+            .workplane(offset=span)
+            .rect(top, top)
+            .loft(combine=True)
+            .translate((cx, cy, 0))
         )
         over_top = (
             cq.Workplane("XY")
@@ -93,7 +169,16 @@ class CellOpeningFeature(PlateFeature):
             .box(top, top, 1, centered=(True, True, False))
             .translate((0, 0, height))
         )
-        return solid.union(over_bottom).union(over_top)
+        result = solid.union(over_top)
+        if config.floor == 0:
+            over_bottom = (
+                cq.Workplane("XY")
+                .center(cx, cy)
+                .box(bottom, bottom, 1, centered=(True, True, False))
+                .translate((0, 0, -1))
+            )
+            result = result.union(over_bottom)
+        return result
 
 
 class MagnetPocketFeature(PlateFeature):
@@ -150,13 +235,102 @@ class MagnetPocketFeature(PlateFeature):
         )
 
 
+class ConnectorFeature(PlateFeature):
+    """Vertical dovetail connectors for tiling frames together.
+
+    A female slot is cut into the +X and +Y outer edges; a male tab is added
+    to the -X and -Y edges. Because both are generated from one profile helper,
+    a tab on one tile mates the slot on the next by construction. The male tab
+    is shrunk by ``clearance`` per side so it slides rather than jams.
+    """
+
+    def apply(self, model: cq.Workplane, config: GridConfig) -> cq.Workplane:
+        if not config.connector.enabled:
+            return model
+
+        half_w, half_l = config.width / 2, config.length / 2
+
+        # Each edge is described by its midpoint and its outward normal. A slot
+        # digs inward (opposite the normal); a tab grows outward (along it), so
+        # the tab on one tile's -X edge mates the slot on its neighbour's +X.
+        edges = {
+            # edge:   (center,          outward normal)
+            "+x": ((half_w, 0.0), (1.0, 0.0)),
+            "+y": ((0.0, half_l), (0.0, 1.0)),
+            "-x": ((-half_w, 0.0), (-1.0, 0.0)),
+            "-y": ((0.0, -half_l), (0.0, -1.0)),
+        }
+
+        # Female slots on +X and +Y; male tabs on -X and -Y.
+        for edge in ("+x", "+y"):
+            center, normal = edges[edge]
+            model = model.cut(self._dovetail(config, center, normal, male=False))
+        for edge in ("-x", "-y"):
+            center, normal = edges[edge]
+            model = model.union(self._dovetail(config, center, normal, male=True))
+        return model
+
+    @staticmethod
+    def _dovetail(
+        config: GridConfig,
+        center: Tuple[float, float],
+        outward: Tuple[float, float],
+        male: bool,
+    ) -> cq.Workplane:
+        """Build one dovetail prism (trapezoid extruded through the height).
+
+        ``outward`` is the edge's outward unit normal. A male tab extrudes along
+        it (projecting past the edge); a female slot extrudes against it (biting
+        into the wall). The trapezoid is narrow at the mouth (the edge line) and
+        wide at depth, so a tab locks into a slot. Sharing one profile keeps tab
+        and slot complementary by construction.
+        """
+        c = config.connector
+        depth = c.depth
+        # Male tab is undersized per side for a sliding fit; slot stays nominal.
+        shrink = c.clearance if male else 0.0
+        half_mouth = (c.width - 2 * shrink) / 2
+        half_inner = (c.inner_width - 2 * shrink) / 2
+        cx, cy = center
+        nx, ny = outward
+        height = config.resolved_height
+
+        # A tab points outward (+depth); a slot points inward (-depth).
+        reach = depth if male else -depth
+        # Edge-tangent unit vector (perpendicular to the normal) runs along u.
+        tx, ty = -ny, nx
+
+        # Local trapezoid points as (u along edge, v along normal direction).
+        pts_local = [
+            (-half_mouth, 0.0),
+            (half_mouth, 0.0),
+            (half_inner, reach),
+            (-half_inner, reach),
+        ]
+        world_pts = [
+            (cx + tx * u + nx * v, cy + ty * u + ny * v) for u, v in pts_local
+        ]
+
+        return (
+            cq.Workplane("XY")
+            .polyline(world_pts)
+            .close()
+            .extrude(height)
+        )
+
+
 class GridfinityPlate:
     """Builds a Gridfinity frame solid from a :class:`GridConfig`."""
 
     def __init__(self, config: GridConfig, features: List[PlateFeature] | None = None):
         self.config = config
         # Default feature pipeline; callers may inject their own ordering.
-        self.features = features or [CellOpeningFeature(), MagnetPocketFeature()]
+        # Connectors run last so tabs attach to the finished outer wall.
+        self.features = features or [
+            CellOpeningFeature(),
+            MagnetPocketFeature(),
+            ConnectorFeature(),
+        ]
 
     def build(self) -> cq.Workplane:
         model = cq.Workplane("XY").box(

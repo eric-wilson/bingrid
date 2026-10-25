@@ -12,23 +12,23 @@ For full configurability (grid size, magnets, taper), prefer the CLI:
 from pathlib import Path
 
 try:  # Allow running both as a module and as a loose script.
-    from .gridfinity import GridConfig, GridfinityPlate, MagnetConfig, ModelExporter, TaperConfig
+    from .gridfinity import GridConfig, GridfinityPlate, MagnetConfig, ModelExporter
 except ImportError:  # pragma: no cover - script-style execution fallback
     import sys
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from gridfinity import GridConfig, GridfinityPlate, MagnetConfig, ModelExporter, TaperConfig
+    from gridfinity import GridConfig, GridfinityPlate, MagnetConfig, ModelExporter
 
 
 def default_config() -> GridConfig:
-    """The original 2x2 open magnetic frame, now with a gentle inner taper."""
+    """The original 2x2 open magnetic frame, now with the Gridfinity socket."""
     return GridConfig(
         grid_x=2,
         grid_y=2,
         pitch=42.0,
         wall=5.0,
+        height=5.0,
         magnet=MagnetConfig(diameter=3.0, depth=1.0),
-        taper=TaperConfig(angle_deg=2.0),
     )
 
 

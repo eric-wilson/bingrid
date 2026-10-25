@@ -28,11 +28,16 @@ class ModelExporter:
 
     def default_name(self, config: GridConfig) -> str:
         """Descriptive, reproducible base file name from the config."""
-        name = f"gridfinity_{config.grid_x}x{config.grid_y}_open"
+        floor_tag = "floor" if config.floor > 0 else "open"
+        name = f"gridfinity_{config.grid_x}x{config.grid_y}_{floor_tag}"
+        if config.opening_style == "socket":
+            name += "_socket"
+        elif config.taper.enabled:
+            name += f"_taper{config.taper.angle_deg}"
         if config.magnet.enabled:
             name += f"_mag_{config.magnet.diameter}x{config.magnet.depth}"
-        if config.taper.enabled:
-            name += f"_taper{config.taper.angle_deg}"
+        if config.connector.enabled:
+            name += "_connect"
         return name
 
     def export(

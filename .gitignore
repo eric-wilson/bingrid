@@ -144,3 +144,4 @@ cython_debug/
 activate.sh
 .output/
 .DS_STORE
+samples/

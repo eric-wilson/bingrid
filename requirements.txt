@@ -1,1 +1,6 @@
 cadquery
+# Mesh inspection tool (meshtools). shapely + networkx back trimesh's 2D
+# section/polygon analysis used to profile reference parts.
+trimesh
+shapely
+networkx

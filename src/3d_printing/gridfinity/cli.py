@@ -13,14 +13,20 @@ import argparse
 from pathlib import Path
 from typing import Sequence
 
-from .config import GridConfig, MagnetConfig, TaperConfig
+from .config import (
+    ConnectorConfig,
+    GridConfig,
+    GridfinityProfile,
+    MagnetConfig,
+    TaperConfig,
+)
 from .exporter import ModelExporter
 from .geometry import GridfinityPlate
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate a parametric Gridfinity-style open frame.",
+        description="Generate a parametric Gridfinity-style frame.",
     )
 
     grid = parser.add_argument_group("grid")
@@ -35,13 +41,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     grid.add_argument(
         "--height", type=float, default=None,
-        help="plate height in mm (default: auto-fit to magnets)",
+        help="plate height in mm (default: auto-fit to profile and magnets)",
+    )
+    grid.add_argument(
+        "--floor", type=float, default=0.0,
+        help="floor thickness in mm; 0 = open floor (default: 0)",
     )
 
-    taper = parser.add_argument_group("taper")
+    opening = parser.add_argument_group("opening profile")
+    opening.add_argument(
+        "--style", choices=["socket", "taper"], default="socket",
+        help="cell opening style: 'socket' = Gridfinity profile, "
+             "'taper' = simple draft (default: socket)",
+    )
+    opening.add_argument(
+        "--profile-top-opening", type=float, default=37.5,
+        help="socket: inner opening at top of the vertical, mm (default: 37.5)",
+    )
+    opening.add_argument(
+        "--profile-chamfer-top", type=float, default=2.15,
+        help="socket: top 45 deg lead-in height, mm (default: 2.15)",
+    )
+    opening.add_argument(
+        "--profile-straight", type=float, default=1.8,
+        help="socket: vertical section height, mm (default: 1.8)",
+    )
+    opening.add_argument(
+        "--profile-chamfer-bottom", type=float, default=0.85,
+        help="socket: bottom chamfer height, mm (default: 0.85)",
+    )
+    opening.add_argument(
+        "--profile-bottom-inset", type=float, default=1.6,
+        help="socket: per-side inward step over the bottom chamfer, mm "
+             "(default: 1.6)",
+    )
+
+    taper = parser.add_argument_group("taper (legacy style)")
     taper.add_argument(
         "--taper-angle", type=float, default=2.0,
-        help="inner-wall draft angle in degrees; 0 = straight (default: 2)",
+        help="taper style: draft angle in degrees; 0 = straight (default: 2)",
     )
 
     magnet = parser.add_argument_group("magnets")
@@ -67,6 +105,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.set_defaults(magnets=True)
 
+    connector = parser.add_argument_group("connectors")
+    connector.add_argument(
+        "--connectors", dest="connectors", action="store_true",
+        help="add dovetail connectors for tiling frames together",
+    )
+    connector.add_argument(
+        "--connector-width", type=float, default=8.0,
+        help="dovetail mouth width in mm (default: 8.0)",
+    )
+    connector.add_argument(
+        "--connector-depth", type=float, default=4.0,
+        help="dovetail depth in mm; must be < wall (default: 4.0)",
+    )
+    connector.add_argument(
+        "--connector-flare", type=float, default=1.5,
+        help="dovetail flare (half the mouth/base difference), mm (default: 1.5)",
+    )
+    connector.add_argument(
+        "--connector-clearance", type=float, default=0.15,
+        help="per-side sliding gap on the male tab, mm (default: 0.15)",
+    )
+    parser.set_defaults(connectors=False)
+
     out = parser.add_argument_group("output")
     out.add_argument(
         "--output-dir", type=Path, default=Path(".output"),
@@ -87,6 +148,15 @@ def config_from_args(args: argparse.Namespace) -> GridConfig:
         pitch=args.pitch,
         wall=args.wall,
         height=args.height,
+        opening_style=args.style,
+        floor=args.floor,
+        profile=GridfinityProfile(
+            top_opening=args.profile_top_opening,
+            chamfer_top=args.profile_chamfer_top,
+            straight=args.profile_straight,
+            chamfer_bottom=args.profile_chamfer_bottom,
+            bottom_inset=args.profile_bottom_inset,
+        ),
         magnet=MagnetConfig(
             enabled=args.magnets,
             diameter=args.magnet_diameter,
@@ -95,6 +165,13 @@ def config_from_args(args: argparse.Namespace) -> GridConfig:
             glue_gap=args.magnet_glue_gap,
         ),
         taper=TaperConfig(angle_deg=args.taper_angle),
+        connector=ConnectorConfig(
+            enabled=args.connectors,
+            width=args.connector_width,
+            depth=args.connector_depth,
+            flare=args.connector_flare,
+            clearance=args.connector_clearance,
+        ),
     )
 
 

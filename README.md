@@ -1,7 +1,28 @@
 # 3d-printing
 
-## Description
+Parametric, configurable [Gridfinity](https://gridfinity.xyz/)-style frame
+generator built on [CadQuery](https://cadquery.readthedocs.io/). Describe the
+grid you want on the command line and get printable STL and STEP files.
 
+The default cell opening reproduces the standard Gridfinity baseplate socket
+profile (measured from the `BGG V1.0.0` reference in `samples/`), so bins seat
+correctly and plates stay compatible when tiled together at any grid size.
+
+## Features
+
+- **Configurable grid** — any X×Y cell count, cell pitch, wall thickness, and height.
+- **Gridfinity socket profile** (default) — each cell opening has the standard
+  lead-in chamfer → vertical → bottom chamfer socket so a bin foot seats cleanly.
+  A legacy simple-taper style is also available.
+- **Open floor by default, optional floor** — openings punch through by default;
+  add `--floor <mm>` for a solid base.
+- **Side magnet pockets** — blind horizontal pockets drilled from the outer edges,
+  sized for your magnets with clearance and a glue allowance.
+- **Dovetail connectors** — optional tabs and slots on the outer edges so frames
+  tile together; push two frames edge-to-edge and the tab seats into the slot.
+- **STL + STEP export** with config-derived file names.
+- **Mesh inspection tool** (`meshtools`) — reusable utility for measuring any
+  STL/OBJ/PLY mesh: size, volume, and cross-section profiles.
 
 ## Installation
 
@@ -10,19 +31,173 @@
 git clone https://github.com/yourusername/3d-printing.git
 cd 3d-printing
 
-# Setup the environment
+# Set up the virtual environment (installs dependencies, incl. cadquery)
 ./pysetup.sh
+
+# Activate it
+source activate.sh
 ```
+
+Dependencies: `cadquery` (modeling), plus `trimesh`, `shapely`, and `networkx`
+(mesh inspection). All are listed in `requirements.txt`.
 
 ## Usage
 
-Describe how to use your project here.
+The generator is driven by a CLI. Run it as a module from the `src` directory
+(or with `src` on `PYTHONPATH`):
 
-## Features
+```bash
+cd src
+python -m 3d_printing.gridfinity.cli --help
+```
 
-- Feature 1
-- Feature 2
-- Feature 3
+### Examples
+
+```bash
+# Default 2x2 frame: Gridfinity socket profile, open floor, magnets
+python -m 3d_printing.gridfinity.cli
+
+# A 3x3 frame matching the BGG reference footprint (126 x 126 x 5 mm)
+python -m 3d_printing.gridfinity.cli --x 3 --y 3 --no-magnets --height 5
+
+# Add a 1.2 mm solid floor
+python -m 3d_printing.gridfinity.cli --floor 1.2
+
+# Legacy simple taper instead of the socket profile
+python -m 3d_printing.gridfinity.cli --style taper --taper-angle 2
+
+# Larger magnets and a thicker wall
+python -m 3d_printing.gridfinity.cli --magnet-diameter 6 --magnet-depth 2 --wall 6
+
+# Tileable frames with dovetail connectors
+python -m 3d_printing.gridfinity.cli --x 2 --y 2 --connectors
+```
+
+Output is written to `.output/` by default (override with `--output-dir`), with
+a name derived from the configuration, e.g.
+`gridfinity_3x3_open_socket_mag_3.0x1.0.stl`.
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--x`, `--y` | `2` | Cells in X and Y |
+| `--pitch` | `42.0` | Gridfinity cell pitch (mm) |
+| `--wall` | `5.0` | Border / crossbar thickness (mm) |
+| `--height` | auto | Plate height (mm); auto-fits the profile and magnets when omitted |
+| `--floor` | `0.0` | Floor thickness (mm); `0` = open floor |
+| `--style` | `socket` | Opening style: `socket` (Gridfinity) or `taper` (legacy) |
+| `--profile-top-opening` | `37.5` | Socket: inner opening along the vertical (mm) |
+| `--profile-chamfer-top` | `2.2` | Socket: top lead-in chamfer height (mm) |
+| `--profile-straight` | `1.75` | Socket: vertical section height (mm) |
+| `--profile-chamfer-bottom` | `0.85` | Socket: bottom chamfer height (mm) |
+| `--profile-bottom-inset` | `1.6` | Socket: per-side inward step over the bottom chamfer (mm) |
+| `--taper-angle` | `2.0` | Taper style: draft angle in degrees; `0` = straight |
+| `--no-magnets` | — | Disable magnet pockets |
+| `--magnet-diameter` | `3.0` | Magnet diameter (mm) |
+| `--magnet-depth` | `1.0` | Magnet depth (mm) |
+| `--magnet-clearance` | `0.2` | Added to diameter for fit (mm) |
+| `--magnet-glue-gap` | `0.3` | Extra pocket depth for glue (mm) |
+| `--connectors` | off | Add dovetail connectors for tiling frames |
+| `--connector-width` | `8.0` | Dovetail mouth width (mm) |
+| `--connector-depth` | `4.0` | Dovetail depth (mm); must be `< wall` |
+| `--connector-flare` | `1.5` | Dovetail flare, half the mouth/base difference (mm) |
+| `--connector-clearance` | `0.15` | Per-side sliding gap on the male tab (mm) |
+| `--output-dir` | `.output` | Output directory |
+| `--name` | derived | Base file name |
+
+### Backward-compatible script
+
+The original entry point still works and now builds the default 2x2 frame with
+the Gridfinity socket profile:
+
+```bash
+python -m 3d_printing.gridfinity_2x2_open_magnetic
+```
+
+## The Gridfinity socket profile
+
+The default opening reproduces the standard Gridfinity baseplate socket. Reading
+a cell wall from the top face downward:
+
+1. a 45° lead-in chamfer (`--profile-chamfer-top`, the mouth),
+2. a straight vertical section (`--profile-straight`),
+3. a bottom chamfer (`--profile-chamfer-bottom`) down to the narrow foot.
+
+The defaults were measured from `samples/BGG V1.0.0 standard.stl.stl` and are
+verified against it by an integration test. Because the outer footprint stays
+flush at `pitch × cells`, tiled plates line up on the 42 mm grid and a bin
+spanning a seam still seats.
+
+## Connectors
+
+Connectors are vertical dovetails placed at the midpoint of each outer edge:
+the `+X` and `+Y` edges receive female slots; the `-X` and `-Y` edges receive
+male tabs. Because the tab and slot are generated from the same profile, a tab
+on one frame mates the slot on its neighbour by construction. The male tab is
+undersized by `--connector-clearance` per side so it slides rather than jams.
+
+## Mesh inspection tool
+
+`meshtools` is a general-purpose, reusable mesh analyzer (built on `trimesh`)
+for measuring reference parts. It reports bounding box, volume, watertightness,
+and cross-section profiles along an axis — useful for reverse-engineering a
+part's dimensions.
+
+```bash
+cd src
+
+# Summary of any mesh
+python -m 3d_printing.meshtools.cli ../samples/"BGG V1.0.0 standard.stl.stl"
+
+# Cross-section profile sweep along Z
+python -m 3d_printing.meshtools.cli ../samples/"BGG V1.0.0 standard.stl.stl" \
+    --profile --axis z --step 0.5
+```
+
+From code:
+
+```python
+from importlib import import_module
+mt = import_module("3d_printing.meshtools")
+
+insp = mt.MeshInspector.load("part.stl")
+print(insp.extents, insp.volume, insp.is_watertight)
+for slice_ in insp.profile(axis="z", step=0.25):
+    print(slice_.position, slice_.solid_area, slice_.hole_count)
+```
+
+## Architecture
+
+The package follows SOLID/DRY principles with clear responsibility boundaries:
+
+```
+src/3d_printing/
+├── gridfinity/
+│   ├── config.py     # Validated value objects (GridConfig, GridfinityProfile,
+│   │                 #   MagnetConfig, TaperConfig, ConnectorConfig)
+│   ├── geometry.py   # GridfinityPlate + pluggable PlateFeature classes
+│   │                 #   (CellOpeningFeature, MagnetPocketFeature, ConnectorFeature)
+│   ├── exporter.py   # ModelExporter — STL/STEP output and file naming
+│   └── cli.py        # Argument parsing and composition root
+└── meshtools/
+    ├── inspector.py  # MeshInspector — mesh measurement and profiling
+    └── cli.py        # Mesh inspection CLI
+```
+
+Each feature is a `PlateFeature` applied to the running solid, so new features
+(stacking lips, labels, baseplate feet) can be added as classes without
+modifying the builder (Open/Closed Principle).
+
+## Development
+
+```bash
+# Fast tests (pure logic + mesh measurement, no CadQuery render)
+pytest
+
+# Integration tests that build and export solids, incl. the BGG profile match
+pytest -m integration
+```
 
 ## Contributing
 
