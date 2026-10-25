@@ -1,0 +1,48 @@
+{
+  "python_paths": [
+    "#!/Users/eric.wilson/Projects/3d-printer-specs/3d-printing/.venv/bin/python",
+    "#!/Users/eric.wilson/Projects/3d-printer-specs/3d-printing/.venv/bin/python3",
+    "#!/Users/eric.wilson/Projects/3d-printer-specs/3d-printing/.venv/bin/python3.13"
+  ],
+  "setup_prompted": {
+    "gitignore": false,
+    "readme_created": true,
+    "gitignore_created": true,
+    "pysetup_json_gitignore": true,
+    "git_initialized": true
+  },
+  "repositories": {
+    "pypi": {
+      "type": "pypi",
+      "enabled": true,
+      "url": "https://pypi.org/simple",
+      "trusted": true
+    },
+    "codeartifact": {
+      "type": "codeartifact",
+      "enabled": false
+    },
+    "artifactory": {
+      "type": "artifactory",
+      "enabled": false
+    },
+    "nexus": {
+      "type": "nexus",
+      "enabled": false
+    },
+    "github": {
+      "type": "github",
+      "enabled": false
+    },
+    "azure": {
+      "type": "azure",
+      "enabled": false
+    },
+    "google": {
+      "type": "google",
+      "enabled": false
+    }
+  },
+  "setup_sh_update_preference": "interactive",
+  "env_action_preference": "clean"
+}
