@@ -220,7 +220,7 @@ class ModelExporter:
             )
             mesh = trimesh.load(str(stl_tmp), force="mesh")
 
-        b0 = config.color_band_start
+        b0 = config.resolved_color_band_start
         b1 = config.color_band_top
         mesh = self._slice_at_z(trimesh, mesh, b0)
         mesh = self._slice_at_z(trimesh, mesh, b1)

@@ -120,18 +120,36 @@ def test_bin_config_rejects_bad_values(config_mod, kwargs, msg):
 def test_color_band_defaults(config_mod):
     cfg = config_mod.BinConfig()
     assert cfg.color_band_enabled is False
-    assert cfg.color_band_start == pytest.approx(35.0)
+    assert cfg.color_band_start is None            # None = auto-position
     assert cfg.color_band_height == pytest.approx(5.0)
     assert cfg.color_band_extruder == 2
-    assert cfg.color_band_top == pytest.approx(40.0)
 
 
-def test_valid_enabled_band_constructs(config_mod):
-    # units=6 -> total_height ~45.8, so the default 35..40 band sits on the wall.
-    cfg = config_mod.BinConfig(height_units=6, color_band_enabled=True)
-    assert cfg.color_band_enabled is True
-    assert cfg.base_height - 1e-9 <= cfg.color_band_start
-    assert cfg.color_band_top <= cfg.total_height + 1e-9
+def test_color_band_auto_centers_in_wall(config_mod):
+    # With no explicit start, the band auto-centers in the wall span and fits
+    # for ANY bin height -- including short bins where a fixed 35 mm would not.
+    for units in (1, 3, 5, 8):
+        cfg = config_mod.BinConfig(height_units=units, color_band_enabled=True)
+        lo, hi = cfg.base_height, cfg.total_height
+        start = cfg.resolved_color_band_start
+        assert lo - 1e-9 <= start
+        assert cfg.color_band_top <= hi + 1e-9
+        # Centered: equal margin above and below the band within the wall span.
+        assert start - lo == pytest.approx(hi - cfg.color_band_top, abs=1e-6)
+
+
+def test_color_band_explicit_start_used_verbatim(config_mod):
+    cfg = config_mod.BinConfig(height_units=6, color_band_enabled=True,
+                               color_band_start=20.0)
+    assert cfg.resolved_color_band_start == pytest.approx(20.0)
+    assert cfg.color_band_top == pytest.approx(25.0)
+
+
+def test_color_band_taller_than_wall_rejected(config_mod):
+    # A band thicker than the whole wall can't fit no matter where it sits.
+    with pytest.raises(ValueError, match="taller than the bin wall"):
+        config_mod.BinConfig(height_units=1, color_band_enabled=True,
+                             color_band_height=100.0)
 
 
 # --- shared profile guards -------------------------------------------------

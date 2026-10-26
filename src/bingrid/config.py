@@ -390,12 +390,13 @@ class BinConfig:
     stacking_lip: bool = True    # Build the stacking lip
     # Painted color-band export (`--3mf-paint`). A horizontal band of the outer
     # wall is painted to a second filament/extruder via a Bambu `paint_color`
-    # attribute. `color_band_start` is measured in PART z (the body base sits at
-    # `base_height`, the wall top at `total_height`). The 35 mm default start
-    # with a 5 mm band reproduces the real Gridfinity bin look and sits inside
-    # the wall for `height_units >= 6`; shorter bins must pass an explicit start.
+    # attribute. The band z is measured in PART z (the body base sits at
+    # `base_height`, the wall top at `total_height`). `color_band_start` is the
+    # z of the band bottom; leave it ``None`` to AUTO-position the band inside
+    # the wall (centered in the wall span, clamped to fit) so it "just works" on
+    # any bin height. Pass an explicit value to override.
     color_band_enabled: bool = False
-    color_band_start: float = 35.0   # z of band bottom, mm (part coords)
+    color_band_start: float | None = None  # z of band bottom, mm; None = auto
     color_band_height: float = 5.0   # band thickness, mm
     color_band_extruder: int = 2     # filament/extruder painted onto the band
     profile: GridfinityProfile = GridfinityProfile()
@@ -455,8 +456,12 @@ class BinConfig:
             if self.color_band_extruder < 2:
                 raise ValueError("color band extruder must be >= 2")
             lo, hi = self.base_height, self.total_height
-            if (self.color_band_start < lo - 1e-9
-                    or self.color_band_top > hi + 1e-9):
+            # The band itself must fit within the wall span regardless of where
+            # it is placed; auto-positioning can only slide it, not shrink it.
+            if self.color_band_height > (hi - lo) + 1e-9:
+                raise ValueError("color band taller than the bin wall")
+            start = self.resolved_color_band_start
+            if start < lo - 1e-9 or start + self.color_band_height > hi + 1e-9:
                 raise ValueError("color band outside the bin wall z-range")
 
     @property
@@ -537,9 +542,28 @@ class BinConfig:
         return self.profile.total_height
 
     @property
+    def resolved_color_band_start(self) -> float:
+        """Z of the band bottom, resolving ``None`` to an auto position, mm.
+
+        When ``color_band_start`` is given, it is used verbatim. When it is
+        ``None`` (the default), the band is centered within the wall span
+        (``base_height .. total_height``) and clamped so it stays inside the
+        wall -- so a painted band "just works" on any bin height without the
+        caller computing a start that fits. A band taller than the wall is
+        rejected in ``__post_init__`` before this is consulted for export.
+        """
+        if self.color_band_start is not None:
+            return self.color_band_start
+        lo, hi = self.base_height, self.total_height
+        centered = lo + (hi - lo - self.color_band_height) / 2.0
+        # Clamp into the wall span (no-op once the band fits, which validation
+        # guarantees for the enabled case).
+        return max(lo, min(centered, hi - self.color_band_height))
+
+    @property
     def color_band_top(self) -> float:
-        """Z of the band's top edge (band start + band height), mm (part coords)."""
-        return self.color_band_start + self.color_band_height
+        """Z of the band's top edge (resolved start + band height), mm (part coords)."""
+        return self.resolved_color_band_start + self.color_band_height
 
     @property
     def overall_height(self) -> float:

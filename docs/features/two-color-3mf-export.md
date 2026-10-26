@@ -73,7 +73,7 @@ paints its colored rim.
 ```bash
 # from src/
 python -m bingrid.bin --x 2 --y 1 --units 6 --3mf-paint
-# writes one bin_2x1_u6_lip_floor1.0.3mf: one mesh, a 35..40 mm band on
+# writes one bin_2x1_u6_lip_floor1.0.3mf: one mesh, an auto-centered band on
 # filament 2, the rest on filament 1
 ```
 
@@ -81,9 +81,11 @@ Flags:
 
 - `--3mf-paint` turns the painted export on. It is a single-mesh path, separate
   from the two-body `--3mf`.
-- `--color-band-start` — z of the band bottom in part coordinates, mm
-  (default `35.0`). Part z is measured from the body base (the wall rises from
-  `base_height` to `total_height`), matching the real Gridfinity rim look.
+- `--color-band-start` — z of the band bottom in part coordinates, mm. Part z is
+  measured from the body base (the wall rises from `base_height` to
+  `total_height`). **Omit it to auto-position** the band centered in the wall,
+  which fits any bin height; pass a value to place it explicitly (e.g. to match
+  the real Gridfinity rim look).
 - `--color-band-height` — band thickness, mm (default `5.0`).
 - `--color-band-extruder` — the filament/extruder painted onto the band
   (default `2`).
@@ -92,9 +94,10 @@ Notes:
 
 - It is **independent of the stacking lip** — the band is on the wall and works
   with or without a lip (no `--3mf --no-stacking-lip`-style guard).
-- The band must fall inside the wall z-range. The default `35..40 mm` band sits
-  on the wall for `--units 6` and taller; for shorter bins pass an explicit
-  `--color-band-start` (a band outside the wall range exits with code 2).
+- By default the band **auto-centers in the wall** span and fits on any bin
+  height, so no start value is needed. An explicit `--color-band-start` that
+  falls outside the wall z-range, or a `--color-band-height` taller than the
+  whole wall, exits with code 2.
 - Each band face carries the simple whole-face paint code (filament 2). The mesh
   is pre-sliced at the two band z-planes so no triangle spans a band edge, which
   keeps every painted face to the simple code (no recursive segmentation).

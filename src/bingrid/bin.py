@@ -119,8 +119,9 @@ def build_parser() -> argparse.ArgumentParser:
              "independent of the stacking lip",
     )
     band.add_argument(
-        "--color-band-start", type=float, default=35.0,
-        help="z of the band bottom in part coords, mm (default: 35.0)",
+        "--color-band-start", type=float, default=None,
+        help="z of the band bottom in part coords, mm "
+             "(default: auto -- centered in the bin wall)",
     )
     band.add_argument(
         "--color-band-height", type=float, default=5.0,

@@ -776,7 +776,7 @@ def test_painted_faces_fall_within_band_and_none_span_boundary(gridfinity, tmp_p
     (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
 
     verts, tris = _parse_painted_model(path)
-    b0, b1 = cfg.color_band_start, cfg.color_band_top
+    b0, b1 = cfg.resolved_color_band_start, cfg.color_band_top
     eps = 0.05  # tessellation tolerance
 
     for v1, v2, v3, paint in tris:
