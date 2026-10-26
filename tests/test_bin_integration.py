@@ -221,16 +221,29 @@ def test_lip_opening_spans_full_interior(gridfinity, gx, gy, tmp_path):
 def test_lip_seat_steps_inward_from_the_mouth(gridfinity, tmp_path):
     """The rim steps inward from mouth to seat, mirroring the socket section.
 
-    The seat (narrowest ring opening, near the bottom of the lip) is inset from
-    the flared mouth (at the top) by ~chamfer_top per side on each axis, from
-    the shared GridfinityProfile. That inward step is the seating ledge a
-    stacked bin's base drops onto.
+    The seat (narrowest ring opening) is inset from the flared mouth (at the
+    top) by ~chamfer_top per side on each axis, from the shared
+    GridfinityProfile. That inward step is the seating ledge a stacked bin's
+    base drops onto. The seat run sits ABOVE the self-supporting bottom lead-in
+    (which flares the opening out to the body interior over the lowest
+    ``run`` mm of the lip), so we slice at the midpoint of the seat run rather
+    than near the lip base -- near the base the opening is the wide interior,
+    not the narrow seat.
     """
     cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6)
     p = cfg.profile
     insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
 
-    z_seat = cfg.total_height + 0.3  # in the straight seat run
+    # Lip-local geometry: bottom lead-in height = widest per-side flare run,
+    # then the straight seat run up to ``lip_h - chamfer_top``. Slice the seat
+    # at the middle of that run.
+    mouth_w0 = cfg.width - 2 * cfg.lip_wall
+    seat_w0 = mouth_w0 - 2 * p.chamfer_top
+    lead_h = max((cfg.inner_width - seat_w0) / 2.0,
+                 (cfg.inner_length - (cfg.length - 2 * cfg.lip_wall
+                                      - 2 * p.chamfer_top)) / 2.0, 0.0)
+    seat_mid = (lead_h + (cfg.lip_h - p.chamfer_top)) / 2.0
+    z_seat = cfg.total_height + seat_mid  # in the straight seat run
     z_mouth = cfg.overall_height - 0.3  # in the flared mouth
     seat = _require_slice(insp, z_seat)
     mouth = _require_slice(insp, z_mouth)
@@ -255,6 +268,116 @@ def test_no_lip_leaves_no_rim_above_total_height(gridfinity, tmp_path):
     # The top of the part is total_height; there is no additive rim above it.
     assert insp.extents[2] == pytest.approx(cfg.total_height, abs=0.1)
     assert insp.slice_at(cfg.total_height + 1.0) is None
+
+
+# --- rounded outer vertical corners ----------------------------------------
+
+def test_outer_corners_are_rounded_not_sharp(gridfinity, tmp_path):
+    """The body footprint is a rounded rectangle (~3.75 mm corner radius).
+
+    This FAILS on the pre-fix sharp box: there a mid-height section has ~4-8
+    exterior vertices and the straight top edge runs to |x| = width/2. After
+    the fillet the section has many exterior points and the straight edge ends
+    at |x| = width/2 - corner_radius, with the bounding box unchanged (a fillet
+    only removes material inside the bbox, never grows it).
+    """
+    cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5)
+    assert cfg.corner_radius == pytest.approx(3.75)
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+
+    # Rounding must NOT change the overall bounding box.
+    assert insp.extents[0] == pytest.approx(cfg.width, abs=0.1)   # 41.5
+    assert insp.extents[1] == pytest.approx(cfg.length, abs=0.1)  # 41.5
+
+    z = cfg.base_height + cfg.body_height / 2  # mid-body, clear of foot & lip
+    section = insp.mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
+    if section is None:
+        pytest.skip("trimesh 2D section extras unavailable")
+    planar, _ = section.to_2D()
+    try:
+        polygons = planar.polygons_full
+    except BaseException:
+        pytest.skip("trimesh 2D section extras unavailable")
+    if not polygons:
+        pytest.skip("slice unavailable")
+
+    exterior = polygons[0].exterior
+    coords = list(exterior.coords)
+    # A rounded rectangle has MANY exterior points; a sharp box has ~4-8.
+    assert len(coords) > 20
+
+    # Fit the fillet: the straight top edge ends at |x| = width/2 - radius.
+    ymax = max(y for _x, y in coords)
+    on_top = [x for x, y in coords if abs(y - ymax) < 1e-2]
+    assert on_top, "no points on the top edge"
+    assert max(abs(x) for x in on_top) == pytest.approx(
+        cfg.width / 2 - cfg.corner_radius, abs=0.4
+    )
+
+
+def test_sharp_corner_opt_out(gridfinity, tmp_path):
+    """--corner-radius 0 keeps the old sharp box (few exterior vertices)."""
+    cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5, corner_radius=0.0)
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+    assert insp.extents[0] == pytest.approx(cfg.width, abs=0.1)
+    z = cfg.base_height + cfg.body_height / 2
+    section = insp.mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
+    if section is None:
+        pytest.skip("trimesh 2D section extras unavailable")
+    planar, _ = section.to_2D()
+    try:
+        polygons = planar.polygons_full
+    except BaseException:
+        pytest.skip("trimesh 2D section extras unavailable")
+    if not polygons:
+        pytest.skip("slice unavailable")
+    # A sharp rectangle's exterior is essentially the four corners (a few extra
+    # collinear splits where the foot union touches an edge); nowhere near the
+    # tens of arc points a rounded corner adds.
+    assert len(list(polygons[0].exterior.coords)) < 20
+
+
+# --- self-supporting (chamfered) stacking-lip underside --------------------
+
+def test_lip_underside_is_self_supporting(gridfinity, tmp_path):
+    """The lip underside tapers at <=45 deg, not a flat downward ledge.
+
+    Root cause of the pre-fix stringing: the lip seat opening (narrow) sat
+    directly on top of the body interior (wide) at z=total_height, so the
+    opening jumped OUTWARD ~2.2 mm/side over ~0 mm of vertical going downward --
+    a near-horizontal downward-facing ledge (effectively a >45 deg overhang).
+
+    We slice ACROSS that transition: just inside the lip (z_hi) and just inside
+    the body below the mating plane (z_lo). Going DOWNWARD the opening may grow
+    by at most the vertical drop on each side (<=45 deg): per axis
+    ``open_lo - open_hi <= 2 * (z_hi - z_lo) + tol``. The old flat ledge jumps
+    ~4.4 mm total over ~0.2 mm -> a slope far steeper than 45 deg, so this
+    invariant genuinely fails on the pre-fix geometry.
+    """
+    cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6)
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+
+    z_lo = cfg.total_height - 0.10  # just below the mating plane (body interior)
+    z_hi = cfg.total_height + 0.10  # just inside the lip (bottom lead-in)
+    lo = _require_slice(insp, z_lo)
+    hi = _require_slice(insp, z_hi)
+    assert lo.hole_count == 1 and hi.hole_count == 1
+
+    lo_w = statistics.median(w for (w, _d) in lo.hole_extents)
+    hi_w = statistics.median(w for (w, _d) in hi.hole_extents)
+    lo_l = statistics.median(d for (_w, d) in lo.hole_extents)
+    hi_l = statistics.median(d for (_w, d) in hi.hole_extents)
+
+    budget = 2 * (z_hi - z_lo) + 0.05  # <=45 deg flare per side + tolerance
+    assert lo_w - hi_w <= budget
+    assert lo_l - hi_l <= budget
+
+    # And the transition is a gradual slope, not a flat plateau with a sudden
+    # jump: the opening actually changes across the lead-in (it does not sit at
+    # a constant width and then step). Sample a couple of points up the lead-in.
+    mid = _require_slice(insp, cfg.total_height + 0.6)
+    mid_w = statistics.median(w for (w, _d) in mid.hole_extents)
+    assert hi_w - mid_w > 0.1  # opening keeps narrowing going up the lead-in
 
 
 # --- #13: bin seats in a plate (fit, no binding) ---------------------------

@@ -34,14 +34,24 @@ def test_height_math_matches_spec(config_mod):
     assert cfg.base_height == pytest.approx(3.8, abs=0.01)
     # total = 3.8 + 35.0 = 38.8 (tight tolerance: spec number, not masked error)
     assert cfg.total_height == pytest.approx(38.8, abs=0.2)
-    # lip adds straight + chamfer_top = 1.75 + 2.2 = 3.95
-    assert cfg.overall_height == pytest.approx(38.8 + 3.95, abs=0.2)
+    # The lip is the full socket cross-section mirrored into the rim, so it adds
+    # profile.total_height = chamfer_top + straight + chamfer_bottom
+    # = 2.2 + 1.75 + 0.85 = 4.8 mm. (The earlier 3.95 mm value omitted the
+    # bottom chamfer, which is exactly the self-supporting lead-in; 4.8 mm is
+    # the correct, full-profile lip.)
+    assert cfg.lip_h == pytest.approx(4.8, abs=0.01)
+    assert cfg.overall_height == pytest.approx(38.8 + 4.8, abs=0.2)
 
 
 def test_overall_height_without_lip_equals_total(config_mod):
     cfg = config_mod.BinConfig(height_units=5, stacking_lip=False)
     assert cfg.lip_h == pytest.approx(0.0)
     assert cfg.overall_height == pytest.approx(cfg.total_height)
+
+
+def test_corner_radius_default_is_spec_value(config_mod):
+    # Published Gridfinity outer vertical corner radius.
+    assert config_mod.BinConfig().corner_radius == pytest.approx(3.75)
 
 
 def test_units_six_gives_body_42(config_mod):
@@ -81,6 +91,9 @@ def test_cavity_bottom_sits_a_floor_above_the_feet(config_mod):
         ({"pitch": 0}, "pitch must be positive"),
         ({"wall": 0}, "wall must be positive"),
         ({"floor": -1}, "floor cannot be negative"),
+        ({"corner_radius": -1}, "corner radius cannot be negative"),
+        # 25 mm radius > 41.5/2 for the default 1x1 footprint.
+        ({"corner_radius": 25.0}, "corner radius too large"),
         ({"foot_clearance": -1}, "foot clearance cannot be negative"),
         ({"lip_clearance": -1}, "lip clearance cannot be negative"),
         ({"lip_wall": 0}, "lip wall must be positive"),

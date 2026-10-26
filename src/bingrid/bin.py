@@ -45,6 +45,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="floor thickness in mm; 0 = open bottom (default: 1.0)",
     )
     grid.add_argument(
+        "--corner-radius", type=float, default=3.75,
+        help="outer vertical corner radius in mm, 0 = sharp (default: 3.75)",
+    )
+    grid.add_argument(
         "--foot-clearance", type=float, default=0.25,
         help="per-side gap between foot and socket, mm (default: 0.25)",
     )
@@ -128,6 +132,7 @@ def config_from_args(args: argparse.Namespace) -> BinConfig:
         pitch=args.pitch,
         wall=args.wall,
         floor=args.floor,
+        corner_radius=args.corner_radius,
         foot_clearance=args.foot_clearance,
         lip_clearance=args.lip_clearance,
         lip_wall=args.lip_wall,

@@ -9,6 +9,14 @@ def test_defaults(bin_mod):
     assert args.stacking_lip is True
     assert args.split_lip is False
     assert args.three_mf is False
+    assert args.corner_radius == 3.75
+
+
+def test_corner_radius_flag_feeds_config(bin_mod):
+    args = bin_mod.build_parser().parse_args(["--corner-radius", "2.0"])
+    assert args.corner_radius == 2.0
+    cfg = bin_mod.config_from_args(args)
+    assert cfg.corner_radius == pytest.approx(2.0)
 
 
 def test_no_stacking_lip_clears_the_lip(bin_mod):

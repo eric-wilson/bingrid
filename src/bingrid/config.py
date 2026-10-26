@@ -382,6 +382,7 @@ class BinConfig:
     pitch: float = 42.0          # Cell pitch, mm
     wall: float = 1.2            # Body wall thickness, mm
     floor: float = 1.0           # Floor thickness above the foot, mm; 0 = open
+    corner_radius: float = 3.75  # Outer vertical corner radius, mm; 0 = sharp
     foot_clearance: float = 0.25  # Per-side gap between foot and socket, mm
     lip_clearance: float = 0.25  # Per-side seating gap inside the lip, mm
     lip_wall: float = 1.2        # Outer wall of the stacking-lip rim ring, mm
@@ -400,6 +401,12 @@ class BinConfig:
             raise ValueError("wall must be positive")
         if self.floor < 0:
             raise ValueError("floor cannot be negative")
+        if self.corner_radius < 0:
+            raise ValueError("corner radius cannot be negative")
+        # A fillet can only remove material inside the footprint; a radius at or
+        # beyond half the shorter side would consume the whole edge.
+        if 2 * self.corner_radius >= min(self.width, self.length):
+            raise ValueError("corner radius too large for footprint")
         if self.foot_clearance < 0:
             raise ValueError("foot clearance cannot be negative")
         if self.lip_clearance < 0:
@@ -452,14 +459,27 @@ class BinConfig:
 
     @property
     def lip_h(self) -> float:
-        """Height of the additive stacking lip (0 when disabled), mm."""
+        """Height of the additive stacking lip (0 when disabled), mm.
+
+        The lip is the full shared socket cross-section mirrored into the rim --
+        top mouth flare, vertical seat run, and a bottom chamfer lead-in -- so
+        its height is ``profile.total_height`` (DRY: the same single source of
+        truth as the baseplate socket and the bin foot). The bottom chamfer is
+        what makes the lip underside self-supporting (<=45 deg) instead of a
+        flat downward-facing ledge, so it prints clean without support.
+        """
         if not self.stacking_lip:
             return 0.0
-        return self.profile.straight + self.profile.chamfer_top
+        return self.profile.total_height
 
     @property
     def overall_height(self) -> float:
-        """Actual top-of-part z a mesh measures (body + lip), mm."""
+        """Actual top-of-part z a mesh measures (body + lip), mm.
+
+        The lip grows upward from ``total_height`` by ``lip_h`` (the full socket
+        profile height), so the body below the ``z=total_height`` mating plane
+        is unchanged and ``build_split`` still splits there.
+        """
         return self.total_height + self.lip_h
 
     @property

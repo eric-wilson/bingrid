@@ -36,6 +36,12 @@ interior, optional stacking lip). Config: `BinConfig`. CLI:
 Key dimensions (derived from the shared profile, verified against the spec):
 
 - **Footprint:** `N*42 - 0.5 mm` per axis (0.25 mm/side drop-in gap). 2x1 = 83.5 x 41.5.
+- **Rounded corners:** a **3.75 mm outer vertical corner radius** gives the bin a
+  rounded-rectangle footprint (real Gridfinity), so bins stack and seat cleanly.
+  Applied to both the body and the stacking-lip rim (they share the outer
+  footprint). Configurable via `--corner-radius` (default 3.75, `0` = sharp);
+  rounding only removes material inside the footprint, so the bounding box stays
+  `N*42 - 0.5` unchanged.
 - **Height:** 7 mm per unit + ~3.8 mm base. `--units 6` body = 45.8 mm tall.
 - **Foot:** the socket's **solid complement** (a male plug) — same z-orientation
   as the socket (narrow at low z, wide at high z), NOT a vertical mirror. The
@@ -47,12 +53,19 @@ Key dimensions (derived from the shared profile, verified against the spec):
   because the per-cell feet never got a bridging floor; fixed.)
 - **Stacking lip:** an additive **full-perimeter rim** above the body whose
   opening tracks the interior footprint (≈ `inner_width × inner_length`), so the
-  bin stays open-top across its whole footprint. The rim steps inward to a
-  seating ledge derived from the shared socket profile, so a bin stacks on a bin
-  exactly like it seats on a baseplate (~3.95 mm tall). (The lip is the socket
-  cross-section swept around the rectangular perimeter — NOT a single socket
-  stamped in the center; that earlier bug left a solid top deck with one small
-  hole and was fixed.)
+  bin stays open-top across its whole footprint. The rim is the **full shared
+  socket cross-section** mirrored into the perimeter — a bottom chamfer lead-in,
+  a straight vertical seat run, and a flared top mouth — so its height is
+  `profile.total_height` (≈ 4.8 mm) and a bin stacks on a bin exactly like it
+  seats on a baseplate. The **underside is chamfered (≤45°, self-supporting)**
+  rather than a flat downward-facing ledge: at the `z = total_height` mating
+  plane the lip opening equals the body interior and tapers inward going up, so
+  the lip prints clean without support and without stringing. (The lip is the
+  socket cross-section swept around the rectangular perimeter — NOT a single
+  socket stamped in the center; that earlier bug left a solid top deck with one
+  small hole and was fixed. An earlier lip also omitted the bottom chamfer,
+  leaving a flat overhanging ledge under the seat; adding the full profile makes
+  it self-supporting.)
 - Feet center on the full `grid*pitch` lattice so multi-cell bins register with
   plate sockets.
 
