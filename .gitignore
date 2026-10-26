@@ -145,3 +145,6 @@ activate.sh
 .output/
 .DS_STORE
 samples/
+
+# Workflow/agent task artifacts (designs, plans, reviews) — local only
+.agents/
