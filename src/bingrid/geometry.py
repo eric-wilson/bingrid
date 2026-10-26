@@ -51,6 +51,84 @@ def _loft_profile(
     return wp.loft(combine=True).translate((center[0], center[1], 0))
 
 
+def _rounded_rect_wire(
+    size: float, radius: float, z: float, cx: float, cy: float
+) -> cq.Wire:
+    """A square wire of side ``size`` with rounded corners, at height ``z``.
+
+    Centered on ``(cx, cy)``. The four corners are 90 deg arcs of ``radius``
+    whose arc centers sit at ``+-(size/2 - radius)`` from the center, so a stack
+    of these wires (with ``radius`` tapering per plane) keeps every corner's arc
+    center on the same vertical line -- the key to the foot staying concentric
+    with the body corner above it. ``radius <= 0`` yields a sharp square.
+    """
+    h = size / 2.0
+    r = max(0.0, min(radius, h))
+    if r <= 1e-9:
+        pts = [(-h, -h), (h, -h), (h, h), (-h, h), (-h, -h)]
+        return cq.Wire.makePolygon(
+            [cq.Vector(cx + x, cy + y, z) for x, y in pts]
+        )
+
+    a = h - r  # corner-arc center offset from the square center
+
+    def v(x: float, y: float) -> cq.Vector:
+        return cq.Vector(cx + x, cy + y, z)
+
+    def arc(center: Tuple[float, float],
+            start: Tuple[float, float],
+            end: Tuple[float, float]) -> cq.Edge:
+        # 90 deg arc from ``start`` to ``end`` about ``center`` (radius r). The
+        # mid point lies on the bisector of the two endpoint directions.
+        dx = (start[0] - center[0]) + (end[0] - center[0])
+        dy = (start[1] - center[1]) + (end[1] - center[1])
+        n = math.hypot(dx, dy)
+        mid = (center[0] + r * dx / n, center[1] + r * dy / n)
+        return cq.Edge.makeThreePointArc(v(*start), v(*mid), v(*end))
+
+    line = lambda p0, p1: cq.Edge.makeLine(v(*p0), v(*p1))  # noqa: E731
+    edges = [
+        line((-a, -h), (a, -h)),            # bottom straight
+        arc((a, -a), (a, -h), (h, -a)),     # bottom-right corner
+        line((h, -a), (h, a)),              # right straight
+        arc((a, a), (h, a), (a, h)),        # top-right corner
+        line((a, h), (-a, h)),              # top straight
+        arc((-a, a), (-a, h), (-h, a)),     # top-left corner
+        line((-h, a), (-h, -a)),            # left straight
+        arc((-a, -a), (-h, -a), (-a, -h)),  # bottom-left corner
+    ]
+    return cq.Wire.assembleEdges(edges)
+
+
+def _loft_rounded_foot(
+    planes: Tuple[Plane, ...],
+    corner_radius,
+    *,
+    center: Tuple[float, float] = (0.0, 0.0),
+) -> cq.Solid:
+    """Loft a foot whose corners are rounded concentric with the body.
+
+    ``corner_radius`` is a callable mapping a plane's square ``size`` to that
+    plane's corner radius (``BinConfig.foot_corner_radius``), so the radius
+    tapers up the profile while every plane's corner arc stays on the same
+    vertical centerline. Lofting explicit rounded-rect wires (rather than
+    filleting the finished square foot) guarantees a watertight solid whose
+    corners align with the body's, closing the foot-to-body corner gap.
+    """
+    cx, cy = center
+    wires = [
+        _rounded_rect_wire(p.size, corner_radius(p.size), p.z, cx, cy)
+        for p in planes
+    ]
+    # ``ruled=True`` so the surface between planes is a straight (ruled) blend,
+    # matching the straight interpolation of the square ``_loft_profile``. A
+    # smooth (B-spline) loft bulges the cross-section outward between the sharp
+    # base wire and the rounded wires above, which would widen the foot near the
+    # base and bind in the socket; the ruled loft keeps the foot at or inside
+    # the square foot's size at every level, so seating clearance is preserved.
+    return cq.Solid.makeLoft(wires, ruled=True)
+
+
 class PlateFeature(ABC):
     """A transformation applied to the plate solid."""
 
@@ -525,9 +603,29 @@ class BinFootFeature(BinFeature):
     def apply(self, model: cq.Workplane, config: BinConfig) -> cq.Workplane:
         planes = config.profile.foot_planes(config.foot_clearance)
         for _i, _j, cx, cy in _bin_cell_centers(config):
-            foot = _loft_profile(planes, base_z=0.0, center=(cx, cy))
+            foot = self._foot(planes, config, cx, cy)
             model = model.union(foot)
         return model
+
+    @staticmethod
+    def _foot(
+        planes: Tuple[Plane, ...], config: BinConfig, cx: float, cy: float
+    ) -> cq.Workplane:
+        """One foot plug, rounded concentric with the body (or sharp at r=0).
+
+        With ``corner_radius > 0`` the foot is lofted from rounded-rect wires
+        whose per-plane radius comes from ``config.foot_corner_radius`` so its
+        corners taper up the profile and stay vertically aligned with the body
+        corners above -- no bind when stacking/seating, no open corner sliver.
+        ``corner_radius == 0`` keeps the original sharp-square loft via the
+        shared :func:`_loft_profile` (socket/foot/lip stay in lockstep).
+        """
+        if config.corner_radius <= 0:
+            return _loft_profile(planes, base_z=0.0, center=(cx, cy))
+        solid = _loft_rounded_foot(
+            planes, config.foot_corner_radius, center=(cx, cy)
+        )
+        return cq.Workplane("XY").newObject([solid])
 
 
 class HollowInteriorFeature(BinFeature):

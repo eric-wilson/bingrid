@@ -38,14 +38,24 @@ Key dimensions (derived from the shared profile, verified against the spec):
 - **Footprint:** `N*42 - 0.5 mm` per axis (0.25 mm/side drop-in gap). 2x1 = 83.5 x 41.5.
 - **Rounded corners:** a **3.75 mm outer vertical corner radius** gives the bin a
   rounded-rectangle footprint (real Gridfinity), so bins stack and seat cleanly.
-  Applied to both the body and the stacking-lip rim (they share the outer
-  footprint). Configurable via `--corner-radius` (default 3.75, `0` = sharp);
-  rounding only removes material inside the footprint, so the bounding box stays
-  `N*42 - 0.5` unchanged.
+  Applied to the body, the stacking-lip rim, **and the foot** (they share the
+  outer footprint / corner center). Configurable via `--corner-radius`
+  (default 3.75, `0` = sharp); rounding only removes material inside the
+  footprint, so the bounding box stays `N*42 - 0.5` unchanged.
 - **Height:** 7 mm per unit + ~3.8 mm base. `--units 6` body = 45.8 mm tall.
 - **Foot:** the socket's **solid complement** (a male plug) — same z-orientation
   as the socket (narrow at low z, wide at high z), NOT a vertical mirror. The
-  foot plugs into the plate socket.
+  foot plugs into the plate socket. Its corners are **rounded concentric with
+  the body corners** rather than left sharp: the per-level radius tapers down
+  the foot (~3.75 mm where the foot flares into the body, down to ~1.3 mm near
+  the base), computed as `corner_radius - (foot_ref_half - foot_half)` so every
+  foot plane's corner arc shares the body corner's center. Keeping the foot
+  corners aligned under the body corners means a bin's foot seats/stacks against
+  the rounded receiving socket without binding, and the foot-to-body transition
+  closes with no open-air sliver at the footprint corners. (An earlier version
+  left the foot with sharp 90° corners, which bound on stacking and left open
+  vertical gaps at two corners; fixed.) Sizing and `foot_clearance` are
+  unchanged, so the foot still plugs into a baseplate socket.
 - **Floor:** with `floor > 0` (default), a **continuous full-footprint slab**
   joins all cells into one solid; the interior cavity is cut a full `floor`
   thickness above the feet (`cavity_bottom = base_height + floor`). `floor = 0`

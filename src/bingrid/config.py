@@ -460,6 +460,49 @@ class BinConfig:
                 raise ValueError("color band outside the bin wall z-range")
 
     @property
+    def foot_ref_half(self) -> float:
+        """Reference half-width the foot corners are concentric about, mm.
+
+        The foot flares to its widest at the top plane (buried in the body),
+        where its corner should match the body's ``corner_radius``. Using that
+        widest foot half-width as the concentric reference keeps every foot's
+        corner center at ``foot_ref_half - corner_radius`` from the foot center
+        -- the same place the body corner's arc center sits above it -- for ANY
+        grid size (the foot sits on the pitch lattice, not the undersized
+        footprint). So each foot's rounded corners line up vertically with the
+        body/socket corner directly above and the transition closes gap-free.
+        """
+        top_size = self.profile.foot_planes(self.foot_clearance)[-1].size
+        return top_size / 2.0
+
+    def foot_corner_radius(self, foot_size: float) -> float:
+        """Corner radius for a foot cross-section of width ``foot_size``, mm.
+
+        The foot's rounded corners are CONCENTRIC with the body's rounded
+        corners (the single ``corner_radius`` reference -- DRY, no second
+        radius). A corner of radius ``r`` on a square of half-size ``h`` has its
+        arc center at ``h - r`` from the foot center; the widest foot plane
+        matches the body, so its corner center sits at
+        ``foot_ref_half - corner_radius``. Rounding every foot plane about that
+        same center means::
+
+            foot_half - r == foot_ref_half - corner_radius
+
+        so ``r = corner_radius - (foot_ref_half - foot_half)``. The radius
+        therefore tapers up the foot -- smaller where the foot is narrow near
+        the base, approaching ``corner_radius`` where the foot flares to the
+        body width -- and every level stays vertically aligned with the
+        body/socket corner so the foot-to-body transition closes with no open
+        sliver. Clamped to ``[0, foot_half]``: a sharp corner where the taper
+        would go negative, never larger than the half-width.
+        """
+        if self.corner_radius <= 0:
+            return 0.0
+        foot_half = foot_size / 2.0
+        r = self.corner_radius - (self.foot_ref_half - foot_half)
+        return max(0.0, min(r, foot_half))
+
+    @property
     def base_height(self) -> float:
         """Height of the exposed foot that plugs into the socket, mm.
 

@@ -145,6 +145,52 @@ def test_profile_planes_regression(config_mod):
         assert p.size == pytest.approx(size)
 
 
+# --- foot corner rounding (concentric with the body) -----------------------
+
+def test_foot_corner_radius_is_concentric_and_tapers(config_mod):
+    """Foot corner radius tapers up the profile, concentric with the body.
+
+    Each foot plane's corner arc center must land at the SAME place as the body
+    corner's arc center (``foot_ref_half - corner_radius``), so the foot corners
+    sit directly under the body corners and the transition closes with no gap.
+    That means ``r = corner_radius - (foot_ref_half - foot_half)`` per plane,
+    which GROWS as the foot widens toward the body.
+    """
+    cfg = config_mod.BinConfig(grid_x=1, grid_y=1, height_units=5)
+    planes = cfg.profile.foot_planes(cfg.foot_clearance)
+    R = cfg.corner_radius
+    ref = cfg.foot_ref_half
+
+    radii = [cfg.foot_corner_radius(p.size) for p in planes]
+    # Tapers up: non-decreasing from base to top, base small, top ~ body radius.
+    assert radii == sorted(radii)
+    assert radii[0] < radii[-1]
+    # The widest (top) foot plane matches the body corner radius exactly.
+    assert radii[-1] == pytest.approx(R, abs=1e-6)
+    # Mid-foot is a modest positive radius (rounded, not sharp), in the measured
+    # ballpark (base small ~0-1.5, mid ~1.5, top 3.75).
+    assert 0.0 < radii[1] < R
+
+    # Concentric: every nonzero-radius plane's corner center is at the shared
+    # body-corner center ``ref - R`` (within float tolerance).
+    for p, r in zip(planes, radii):
+        if r > 0:
+            foot_half = p.size / 2.0
+            assert foot_half - r == pytest.approx(ref - R, abs=1e-6)
+
+
+def test_foot_corner_radius_clamps_and_opts_out(config_mod):
+    cfg = config_mod.BinConfig(grid_x=1, grid_y=1)
+    # Clamped to >= 0 when the taper would go negative (very narrow plane).
+    assert cfg.foot_corner_radius(1.0) == 0.0
+    # Never exceeds the plane half-width.
+    assert cfg.foot_corner_radius(2.0) <= 1.0
+    # corner_radius=0 opts every foot plane out (sharp), keeping the old foot.
+    sharp = config_mod.BinConfig(grid_x=1, grid_y=1, corner_radius=0.0)
+    planes = sharp.profile.foot_planes(sharp.foot_clearance)
+    assert all(sharp.foot_corner_radius(p.size) == 0.0 for p in planes)
+
+
 def test_foot_planes_derive_from_socket(config_mod):
     prof = config_mod.GridfinityProfile()
     socket = prof.profile_planes()
