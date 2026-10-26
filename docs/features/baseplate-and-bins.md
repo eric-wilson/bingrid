@@ -40,8 +40,14 @@ Key dimensions (derived from the shared profile, verified against the spec):
 - **Foot:** the socket's **solid complement** (a male plug) — same z-orientation
   as the socket (narrow at low z, wide at high z), NOT a vertical mirror. The
   foot plugs into the plate socket.
-- **Stacking lip:** an additive cap above the body that mirrors the socket, so a
-  bin stacks on a bin exactly like it seats on a baseplate (~3.95 mm tall).
+- **Stacking lip:** an additive **full-perimeter rim** above the body whose
+  opening tracks the interior footprint (≈ `inner_width × inner_length`), so the
+  bin stays open-top across its whole footprint. The rim steps inward to a
+  seating ledge derived from the shared socket profile, so a bin stacks on a bin
+  exactly like it seats on a baseplate (~3.95 mm tall). (The lip is the socket
+  cross-section swept around the rectangular perimeter — NOT a single socket
+  stamped in the center; that earlier bug left a solid top deck with one small
+  hole and was fixed.)
 - Feet center on the full `grid*pitch` lattice so multi-cell bins register with
   plate sockets.
 
