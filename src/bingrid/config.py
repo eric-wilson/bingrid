@@ -367,10 +367,11 @@ class BinConfig:
     """A Gridfinity bin: a hollow open-top container that plugs into a plate.
 
     The bin's foot is the socket's solid mate (:meth:`GridfinityProfile.foot_planes`)
-    and its optional stacking lip is a miniature downward-opening socket in the
-    rim, so a bin stacks on a bin exactly as it seats on a baseplate. Footprint
-    is ``N*pitch - 0.5`` (0.25 mm per-side grid gap) so the bin drops into the
-    plate opening -- deliberately 0.5 mm smaller than ``GridConfig.width``.
+    and its optional stacking lip is a perimeter rim whose opening mirrors the
+    socket cross-section swept around the whole top edge, so a bin stacks on a
+    bin much as it seats on a baseplate. Footprint is ``N*pitch - 0.5``
+    (0.25 mm per-side grid gap) so the bin drops into the plate opening --
+    deliberately 0.5 mm smaller than ``GridConfig.width``.
     """
 
     HEIGHT_UNIT = 7.0  # mm per Gridfinity height unit
@@ -419,8 +420,13 @@ class BinConfig:
             raise ValueError("floor must be less than the bin height")
         if self.foot_clearance * 2 >= self.profile.bottom_opening:
             raise ValueError("foot clearance too large; foot collapses")
-        if self.stacking_lip and self.width - 2 * self.lip_wall < self.profile.top_opening:
-            raise ValueError("wall too thin for stacking lip")
+        if self.stacking_lip:
+            # The lip is a perimeter rim, not a central socket: its opening
+            # tracks the footprint minus the rim wall and the mouth->seat step.
+            # The seat (narrowest ring opening) must stay positive on both axes.
+            step = 2 * self.lip_wall + 2 * self.profile.chamfer_top
+            if min(self.width, self.length) - step <= 0:
+                raise ValueError("wall too thin for stacking lip")
 
     @property
     def base_height(self) -> float:

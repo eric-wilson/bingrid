@@ -551,16 +551,52 @@ class HollowInteriorFeature(BinFeature):
         return model.cut(cavity)
 
 
+def _rect_loft(
+    sizes: Tuple[Tuple[float, float, float], ...],
+    *,
+    base_z: float,
+    center: Tuple[float, float] = (0.0, 0.0),
+) -> cq.Workplane:
+    """Loft a rectangular profile from ordered ``(z, w, l)`` planes, bottom-up.
+
+    The rectangular sibling of :func:`_loft_profile` (which lofts squares). The
+    perimeter stacking-lip opening is not square -- a 2x1 bin's interior is
+    ~81 x 39 mm -- so the lip's rectangular socket cross-section is swept with
+    this helper. The call chain mirrors ``_loft_profile``: one leading
+    ``.workplane(offset=base_z)`` then one ``.rect`` per plane, a single
+    ``.loft(combine=True)``, and a final ``.translate``.
+    """
+    z0, w0, l0 = sizes[0]
+    if z0 != 0:
+        raise ValueError("first profile plane must sit at z=0")
+    wp = cq.Workplane("XY").workplane(offset=base_z).rect(w0, l0)
+    for (pz, _pw, _pl), (z, w, l) in zip(sizes, sizes[1:]):
+        wp = wp.workplane(offset=z - pz).rect(w, l)
+    return wp.loft(combine=True).translate((center[0], center[1], 0))
+
+
 class StackingLipFeature(BinFeature):
-    """A downward-opening miniature socket cut into an additive rim ring.
+    """An additive perimeter rim that mirrors the Gridfinity socket cross-section.
 
     Entirely additive above z=total_height: a solid rim ring (outer =
-    width x length) occupies z=total_height..total_height+lip_h, then the
-    downward-opening lip profile is cut from it so a stacked bin's foot drops in
-    exactly as a foot seats in a plate socket. The lip's vertical seating cut is
-    the profile's ``top_opening`` (= the plate socket vertical), so a 37.0 foot
-    clears the 37.5 cut by foot_clearance per side. Self-skips when the config
-    disables the lip. Runs last so it attaches to the finished wall.
+    width x length) occupies z=total_height..total_height+lip_h, and a
+    rectangular socket-shaped cavity -- swept around the WHOLE perimeter rather
+    than stamped once in the center -- is cut from it. The cavity opening spans
+    nearly the full interior footprint (close to inner_width x inner_length), so
+    the bin is genuinely open-top across its whole footprint, not capped by a
+    solid deck with one small hole.
+
+    The rim steps inward from the outer wall to form a seating ledge, exactly
+    the socket cross-section seen around the perimeter: narrow seat at the
+    bottom, a straight vertical section, then a flared mouth at the top face.
+    Because the seat is reached by stepping in ``chamfer_top`` from the wider
+    mouth, a stacked bin's base seats on the ledge the same way a foot seats in
+    a plate socket. The vertical seating run (``straight`` + ``chamfer_top``)
+    comes straight from the shared :class:`GridfinityProfile`, keeping the
+    baseplate socket, the bin foot, and the bin lip in lockstep (DRY).
+
+    Self-skips when the config disables the lip. Runs last so it attaches to the
+    finished wall.
     """
 
     def apply(self, model: cq.Workplane, config: BinConfig) -> cq.Workplane:
@@ -570,7 +606,11 @@ class StackingLipFeature(BinFeature):
 
     @staticmethod
     def lip_solid(config: BinConfig) -> cq.Workplane:
-        """The lip ring (with its downward cut) in world coordinates."""
+        """The lip rim (outer ring minus the perimeter socket cavity).
+
+        Built in world coordinates so :meth:`GridfinityBin.build_split` can hand
+        back a lip that is already aligned to the body at z=total_height.
+        """
         p = config.profile
         z0 = config.total_height
         ring = (
@@ -583,23 +623,31 @@ class StackingLipFeature(BinFeature):
             )
             .translate((0, 0, z0))
         )
-        # Downward-opening lip cut, bottom-up from the ring bottom:
-        #   mouth (clamped to the footprint) at offset 0,
-        #   vertical seat (top_opening) across the straight+chamfer run.
-        mouth_cut = min(p.mouth_opening, config.width - 2 * config.lip_wall)
-        planes = (
-            Plane(0.0, mouth_cut),
-            Plane(p.chamfer_top, p.top_opening),
-            Plane(config.lip_h, p.top_opening),
+        # The perimeter socket cavity, bottom-up over z=0..lip_h:
+        #   * seat (narrowest) at the bottom, held across the straight run,
+        #   * flared mouth (widest) at the top face.
+        # The mouth leaves ``lip_wall`` of rim at the top on every side; the
+        # seat steps in a further ``chamfer_top`` per side, which is the ledge a
+        # stacked bin's base drops onto. Both axes are offset from the full
+        # footprint, so the opening tracks the interior (~inner_width x
+        # inner_length) instead of a single centered hole.
+        mouth_w = config.width - 2 * config.lip_wall
+        mouth_l = config.length - 2 * config.lip_wall
+        seat_w = mouth_w - 2 * p.chamfer_top
+        seat_l = mouth_l - 2 * p.chamfer_top
+        sizes = (
+            (0.0, seat_w, seat_l),
+            (p.straight, seat_w, seat_l),
+            (config.lip_h, mouth_w, mouth_l),
         )
-        cut = _loft_profile(planes, base_z=z0, center=(0.0, 0.0))
-        # Over-cut 1 mm above the ring top so the seat punches cleanly.
+        cavity = _rect_loft(sizes, base_z=z0, center=(0.0, 0.0))
+        # Over-cut 1 mm above the ring top so the mouth punches cleanly.
         over_top = (
             cq.Workplane("XY")
-            .box(p.top_opening, p.top_opening, 1.0, centered=(True, True, False))
+            .box(mouth_w, mouth_l, 1.0, centered=(True, True, False))
             .translate((0, 0, z0 + config.lip_h))
         )
-        return ring.cut(cut).cut(over_top)
+        return ring.cut(cavity).cut(over_top)
 
 
 class GridfinityBin:

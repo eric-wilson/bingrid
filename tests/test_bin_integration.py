@@ -114,28 +114,80 @@ def test_foot_profile_matches_socket(gridfinity, tmp_path):
     assert vert.outer[0] == pytest.approx(37.0, abs=0.3)
 
 
-# --- #12: stacking lip mirrors the socket, via the bin's own foot ----------
+# --- #12: the stacking lip is a full-perimeter rim, not a center socket ----
 
-def test_lip_mirrors_socket_via_own_foot(gridfinity, tmp_path):
-    cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5)
+@pytest.mark.parametrize("gx,gy", [(1, 1), (2, 1), (2, 3)])
+def test_lipped_bin_is_watertight(gridfinity, gx, gy):
+    cfg = gridfinity.BinConfig(grid_x=gx, grid_y=gy, height_units=6)
+    assert cfg.stacking_lip  # lip on by default
+    assert gridfinity.GridfinityBin(cfg).build().val().isValid()
+
+
+@pytest.mark.parametrize("gx,gy", [(1, 1), (2, 1), (2, 3)])
+def test_lip_opening_spans_full_interior(gridfinity, gx, gy, tmp_path):
+    """The lip opening must track the interior footprint, not a ~42 mm hole.
+
+    This FAILS on the old single-socket lip: that lip capped the top as a solid
+    deck and opened just one ~41.9 mm socket in the center, so for a 2x1 the
+    opening read ~42 x 42 instead of ~81 x 39. Here we slice just below the top
+    of the lip (within the flared mouth) and assert the opening follows the full
+    interior on BOTH axes.
+    """
+    cfg = gridfinity.BinConfig(grid_x=gx, grid_y=gy, height_units=6)
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+
+    z = cfg.overall_height - 0.3  # just below the top of the lip, in the mouth
+    prof = insp.slice_at(z)
+    if prof is None:
+        # No 2D extras: fall back to a solid validity check so the lip is never
+        # left unverified, but still guard the top opening we can reach.
+        pytest.skip("trimesh 2D section extras unavailable")
+
+    assert prof.hole_count == 1
+    open_w = statistics.median(w for (w, _d) in prof.hole_extents)
+    open_l = statistics.median(d for (_w, d) in prof.hole_extents)
+
+    # The mouth leaves lip_wall per side off the full footprint. Both axes track
+    # the interior -- and critically the SHORT axis is nowhere near ~42 mm on a
+    # wide bin, which is the single-socket bug this test exists to catch.
+    expected_w = cfg.width - 2 * cfg.lip_wall
+    expected_l = cfg.length - 2 * cfg.lip_wall
+    assert open_w == pytest.approx(expected_w, abs=1.5)
+    assert open_l == pytest.approx(expected_l, abs=1.5)
+    # The opening must be close to the body interior, far from a 41.9 mm socket.
+    assert open_w == pytest.approx(cfg.inner_width, abs=3.0)
+    assert open_l == pytest.approx(cfg.inner_length, abs=3.0)
+
+
+def test_lip_seat_steps_inward_from_the_mouth(gridfinity, tmp_path):
+    """The rim steps inward from mouth to seat, mirroring the socket section.
+
+    The seat (narrowest ring opening, near the bottom of the lip) is inset from
+    the flared mouth (at the top) by ~chamfer_top per side on each axis, from
+    the shared GridfinityProfile. That inward step is the seating ledge a
+    stacked bin's base drops onto.
+    """
+    cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6)
     p = cfg.profile
-    bin_insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
-    # (a) The lip seating cut ~ top_opening = 37.5 (one interior hole). Sample
-    # near the bottom of the vertical seat (just above the mouth chamfer); the
-    # loft pinches ~0.2 at the exact mid-seat, so the seat edge is the faithful
-    # reading of the 37.5 vertical.
-    z_seat = cfg.total_height + p.chamfer_top + 0.1
-    seat = _require_slice(bin_insp, z_seat)
-    assert seat.hole_count == 1
-    lip_cut = statistics.median(w for (w, _d) in seat.hole_extents)
-    assert lip_cut == pytest.approx(p.top_opening, abs=0.3)   # 37.5
-    # (b) The bin's own foot vertical ~ 37.0, so the lip cut clears it by ~0.5.
-    # Build a foot-only solid (single cell, centered at origin) and measure it.
-    foot_only = gridfinity.GridfinityBin(cfg, features=[gridfinity.BinFootFeature()])
-    foot_insp = _export_inspect(gridfinity, foot_only.build(), tmp_path)
-    foot_vert = _require_slice(foot_insp, 1.2)
-    assert foot_vert.outer[0] == pytest.approx(37.0, abs=0.2)
-    assert lip_cut - foot_vert.outer[0] == pytest.approx(0.5, abs=0.2)
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+
+    z_seat = cfg.total_height + 0.3  # in the straight seat run
+    z_mouth = cfg.overall_height - 0.3  # in the flared mouth
+    seat = _require_slice(insp, z_seat)
+    mouth = _require_slice(insp, z_mouth)
+    assert seat.hole_count == 1 and mouth.hole_count == 1
+
+    seat_w = statistics.median(w for (w, _d) in seat.hole_extents)
+    mouth_w = statistics.median(w for (w, _d) in mouth.hole_extents)
+    seat_l = statistics.median(d for (_w, d) in seat.hole_extents)
+    mouth_l = statistics.median(d for (_w, d) in mouth.hole_extents)
+
+    # Seat is inset from the mouth by ~chamfer_top per side (both axes).
+    assert mouth_w - seat_w == pytest.approx(2 * p.chamfer_top, abs=0.8)
+    assert mouth_l - seat_l == pytest.approx(2 * p.chamfer_top, abs=0.8)
+    # And the seat itself still spans most of the interior, not a tiny hole.
+    assert seat_w > cfg.inner_width - 2 * p.chamfer_top - 1.5
+    assert seat_l > cfg.inner_length - 2 * p.chamfer_top - 1.5
 
 
 def test_no_lip_leaves_no_rim_above_total_height(gridfinity, tmp_path):

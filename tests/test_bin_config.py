@@ -86,8 +86,8 @@ def test_cavity_bottom_clamps_to_base_height(config_mod):
         ({"wall": 21.0}, "no interior left"),
         ({"floor": 100.0, "height_units": 1}, "floor must be less than"),
         ({"foot_clearance": 20.0}, "foot collapses"),
-        # footprint so small the lip ring is thinner than lip_wall
-        ({"pitch": 39.0, "lip_wall": 1.2}, "wall too thin for stacking lip"),
+        # lip rim wall so thick the perimeter seat opening collapses (<=0)
+        ({"lip_wall": 20.0}, "wall too thin for stacking lip"),
     ],
 )
 def test_bin_config_rejects_bad_values(config_mod, kwargs, msg):
