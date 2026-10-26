@@ -40,6 +40,11 @@ Key dimensions (derived from the shared profile, verified against the spec):
 - **Foot:** the socket's **solid complement** (a male plug) — same z-orientation
   as the socket (narrow at low z, wide at high z), NOT a vertical mirror. The
   foot plugs into the plate socket.
+- **Floor:** with `floor > 0` (default), a **continuous full-footprint slab**
+  joins all cells into one solid; the interior cavity is cut a full `floor`
+  thickness above the feet (`cavity_bottom = base_height + floor`). `floor = 0`
+  keeps the intentional open bottom. (An earlier bug left an inter-cell channel
+  because the per-cell feet never got a bridging floor; fixed.)
 - **Stacking lip:** an additive **full-perimeter rim** above the body whose
   opening tracks the interior footprint (≈ `inner_width × inner_length`), so the
   bin stays open-top across its whole footprint. The rim steps inward to a
