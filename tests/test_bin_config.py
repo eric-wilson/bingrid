@@ -58,13 +58,16 @@ def test_inner_cavity_is_width_minus_two_walls(config_mod):
     assert cfg.inner_width > 0 and cfg.inner_length > 0
 
 
-def test_cavity_bottom_clamps_to_base_height(config_mod):
-    # Small floor -> clamped up to base_height (the foot zone is the base).
-    assert config_mod.BinConfig(floor=0.5).cavity_bottom == pytest.approx(3.8, abs=0.01)
-    # Open bottom -> still clamped to base_height, not 0.
+def test_cavity_bottom_sits_a_floor_above_the_feet(config_mod):
+    # The cavity starts a floor slab's thickness above the top of the feet
+    # (base_height=3.8), so base_height..base_height+floor stays solid: the
+    # continuous floor slab that joins every cell.
+    assert config_mod.BinConfig(floor=0.5).cavity_bottom == pytest.approx(4.3, abs=0.01)
+    assert config_mod.BinConfig(floor=1.0).cavity_bottom == pytest.approx(4.8, abs=0.01)
+    # Open bottom (floor=0) -> cavity starts right at base_height, no slab.
     assert config_mod.BinConfig(floor=0.0).cavity_bottom == pytest.approx(3.8, abs=0.01)
-    # floor > base_height (the base_height < floor < total_height branch).
-    assert config_mod.BinConfig(floor=6.0, height_units=6).cavity_bottom == pytest.approx(6.0)
+    # A thick floor still sits base_height above its own thickness.
+    assert config_mod.BinConfig(floor=6.0, height_units=6).cavity_bottom == pytest.approx(9.8, abs=0.01)
 
 
 # --- validation ------------------------------------------------------------

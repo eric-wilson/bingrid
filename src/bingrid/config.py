@@ -416,8 +416,11 @@ class BinConfig:
             raise ValueError("wall too thick; no interior left")
         if self.inner_width <= 0 or self.inner_length <= 0:
             raise ValueError("wall too thick; no interior left")
-        if self.floor >= self.total_height:
-            raise ValueError("floor must be less than the bin height")
+        # The floor slab sits on top of the feet, inside the body stack
+        # (z = base_height .. base_height + floor). It must leave usable body
+        # above it, so floor must be strictly less than the body height.
+        if self.floor >= self.body_height:
+            raise ValueError("floor must be less than the body height")
         if self.foot_clearance * 2 >= self.profile.bottom_opening:
             raise ValueError("foot clearance too large; foot collapses")
         if self.stacking_lip:
@@ -479,8 +482,16 @@ class BinConfig:
     def cavity_bottom(self) -> float:
         """Z where the hollow interior starts.
 
-        Clamped to the top of the foot (``base_height``) so the cut only removes
-        material from the full-width body above the foot, never punches through
-        the narrower foot side walls (which would leave a non-manifold base).
+        The hollow is cut out of the full-width body, which spans
+        ``base_height .. total_height``. The cut starts a floor slab's thickness
+        above the top of the feet, so a continuous full-footprint floor slab
+        (``base_height .. base_height + floor``) is left solid, bridging every
+        cell into one piece -- there is no open channel between adjacent feet.
+
+        For ``floor == 0`` (open bottom) the cut starts right at ``base_height``,
+        so no slab is left and the interior stays open down onto the feet, which
+        is the intended open-bottom behaviour. Starting no lower than
+        ``base_height`` also means the cut never punches through the narrower
+        foot side walls (which would leave a non-manifold base).
         """
-        return max(self.floor, self.base_height)
+        return self.base_height + self.floor

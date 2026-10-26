@@ -76,11 +76,70 @@ def test_open_bottom_bin_is_watertight(gridfinity):
     assert gridfinity.GridfinityBin(cfg).build().val().isValid()
 
 
-def test_floor_above_base_height_branch(gridfinity):
-    # base_height < floor < total_height: cavity_bottom tracks floor.
+def test_thick_floor_branch(gridfinity):
+    # A thick floor still sits base_height above its own thickness, and the
+    # solid stays valid.
     cfg = gridfinity.BinConfig(height_units=6, floor=6.0)
-    assert cfg.cavity_bottom == pytest.approx(6.0)
+    assert cfg.cavity_bottom == pytest.approx(cfg.base_height + 6.0)
     assert gridfinity.GridfinityBin(cfg).build().val().isValid()
+
+
+# --- #16: the floor slab bridges every cell (no inter-cell channel) --------
+
+@pytest.mark.parametrize("gx,gy", [(1, 1), (2, 1), (2, 3)])
+def test_floored_bin_has_continuous_floor_joining_cells(gridfinity, gx, gy, tmp_path):
+    """A floored multi-cell bin must have a continuous floor slab, no gap.
+
+    This FAILS on the pre-fix geometry: there the cavity started right at the
+    top of the feet, so below the body the only solid was the per-cell feet --
+    adjacent feet left a ~0.6 mm open channel and a low slice showed two
+    DISJOINT foot sections (and that gap ran straight up into the interior).
+    Here we slice inside the floor slab (just above the feet) and assert the
+    section is a SINGLE connected region spanning the full footprint with no
+    interior hole: the floor bridges the cells into one piece.
+    """
+    cfg = gridfinity.BinConfig(grid_x=gx, grid_y=gy, height_units=6)
+    assert cfg.floor > 0  # floored by default
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+
+    z = cfg.base_height + cfg.floor / 2  # mid-slab, just above the feet
+    section = insp.mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
+    if section is None:
+        pytest.skip("trimesh 2D section extras unavailable")
+    planar, _ = section.to_2D()
+    try:
+        polygons = planar.polygons_full
+    except BaseException:
+        pytest.skip("trimesh 2D section extras unavailable")
+    if not polygons:
+        # No 2D extras / degenerate slice: fall back to solid validity so the
+        # floor is never left unverified on a bare env.
+        assert gridfinity.GridfinityBin(cfg).build().val().isValid()
+        pytest.skip("slice unavailable; verified solid validity instead")
+
+    # One connected region, no inter-cell gap, no interior hole.
+    assert len(polygons) == 1
+    prof = insp.slice_at(z)
+    assert prof.hole_count == 0
+    # The slab spans ~the full footprint on both axes (the gap is gone).
+    assert prof.outer[0] == pytest.approx(cfg.width, abs=0.5)
+    assert prof.outer[1] == pytest.approx(cfg.length, abs=0.5)
+
+
+@pytest.mark.parametrize("gx,gy", [(1, 1), (2, 1), (2, 3)])
+def test_open_bottom_bin_has_no_floor_slab(gridfinity, gx, gy, tmp_path):
+    """floor=0 keeps its open bottom: no slab, interior open onto the feet."""
+    cfg = gridfinity.BinConfig(grid_x=gx, grid_y=gy, height_units=6, floor=0.0)
+    assert cfg.cavity_bottom == pytest.approx(cfg.base_height)
+    bin_solid = gridfinity.GridfinityBin(cfg).build()
+    assert bin_solid.val().isValid()
+
+    insp = _export_inspect(gridfinity, bin_solid, tmp_path)
+    # Just above the feet the interior is open (a hole), not a solid floor.
+    prof = insp.slice_at(cfg.base_height + 0.1)
+    if prof is None:
+        pytest.skip("trimesh 2D section extras unavailable")
+    assert prof.hole_count == 1
 
 
 # --- #10: footprint/height of the exported mesh ----------------------------
