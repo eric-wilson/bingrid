@@ -61,3 +61,58 @@ step. Select the **lip** part and assign it a different **filament/extruder**
 than the body; on a multi-color setup (AMS) it prints as one seamless object in
 two colors (e.g. a black body with a blue lip). This is the single-file
 alternative to combining the two `--split-lip` STLs by hand.
+
+## The `--3mf-paint` flag — single-mesh painted color band
+
+`--3mf-paint` is a different take on two colors: instead of two separate bodies,
+it exports the bin as **one single mesh** and paints a **horizontal color band**
+around the outer wall, assigning that band to a second filament/extruder with a
+Bambu per-triangle `paint_color` attribute — the way a real Gridfinity bin
+paints its colored rim.
+
+```bash
+# from src/
+python -m bingrid.bin --x 2 --y 1 --units 6 --3mf-paint
+# writes one bin_2x1_u6_lip_floor1.0.3mf: one mesh, a 35..40 mm band on
+# filament 2, the rest on filament 1
+```
+
+Flags:
+
+- `--3mf-paint` turns the painted export on. It is a single-mesh path, separate
+  from the two-body `--3mf`.
+- `--color-band-start` — z of the band bottom in part coordinates, mm
+  (default `35.0`). Part z is measured from the body base (the wall rises from
+  `base_height` to `total_height`), matching the real Gridfinity rim look.
+- `--color-band-height` — band thickness, mm (default `5.0`).
+- `--color-band-extruder` — the filament/extruder painted onto the band
+  (default `2`).
+
+Notes:
+
+- It is **independent of the stacking lip** — the band is on the wall and works
+  with or without a lip (no `--3mf --no-stacking-lip`-style guard).
+- The band must fall inside the wall z-range. The default `35..40 mm` band sits
+  on the wall for `--units 6` and taller; for shorter bins pass an explicit
+  `--color-band-start` (a band outside the wall range exits with code 2).
+- Each band face carries the simple whole-face paint code (filament 2). The mesh
+  is pre-sliced at the two band z-planes so no triangle spans a band edge, which
+  keeps every painted face to the simple code (no recursive segmentation).
+
+### Geometry + paint only — no print profile
+
+The painted `.3mf` carries **geometry and paint only**: the base is filament 1,
+the band is the chosen second filament, and that is all. It deliberately does
+**not** embed a Bambu print/printer profile (that is printer- and
+version-specific and would trigger the "invalid config, load geometry only"
+warning path). On load you apply your own printer and print settings — this is
+expected.
+
+### The purge/flush tower is a slicer concern
+
+The tall color-change tower some two-color prints build is a **slicer-side**
+matter, not something the mesh controls. Reduce it in the slicer by lowering the
+flush/purge volume between the two filaments, or by choosing "flush into
+infill" / "flush into object". The painted `.3mf` only says which faces belong
+to which filament; how much material is purged on each change is up to the
+slicer's flush settings.

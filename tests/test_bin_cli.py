@@ -47,6 +47,28 @@ def test_3mf_defaults_off(bin_mod):
     assert args.three_mf is False
 
 
+def test_3mf_paint_sets_flag(bin_mod):
+    args = bin_mod.build_parser().parse_args(["--3mf-paint"])
+    assert args.three_mf_paint is True
+
+
+def test_3mf_paint_defaults_off(bin_mod):
+    args = bin_mod.build_parser().parse_args([])
+    assert args.three_mf_paint is False
+
+
+def test_color_band_flags_feed_config(bin_mod):
+    args = bin_mod.build_parser().parse_args(
+        ["--3mf-paint", "--units", "6", "--color-band-start", "20",
+         "--color-band-height", "6", "--color-band-extruder", "3"]
+    )
+    cfg = bin_mod.config_from_args(args)
+    assert cfg.color_band_enabled is True
+    assert cfg.color_band_start == pytest.approx(20.0)
+    assert cfg.color_band_height == pytest.approx(6.0)
+    assert cfg.color_band_extruder == 3
+
+
 def test_3mf_without_lip_returns_2_and_writes_nothing(bin_mod, tmp_path, capsys):
     rc = bin_mod.main(
         ["--3mf", "--no-stacking-lip", "--output-dir", str(tmp_path)]

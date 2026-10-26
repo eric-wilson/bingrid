@@ -388,6 +388,16 @@ class BinConfig:
     lip_wall: float = 1.2        # Outer wall of the stacking-lip rim ring, mm
     base_overlap: float = 1.0    # mm the foot's mouth flare overlaps the body
     stacking_lip: bool = True    # Build the stacking lip
+    # Painted color-band export (`--3mf-paint`). A horizontal band of the outer
+    # wall is painted to a second filament/extruder via a Bambu `paint_color`
+    # attribute. `color_band_start` is measured in PART z (the body base sits at
+    # `base_height`, the wall top at `total_height`). The 35 mm default start
+    # with a 5 mm band reproduces the real Gridfinity bin look and sits inside
+    # the wall for `height_units >= 6`; shorter bins must pass an explicit start.
+    color_band_enabled: bool = False
+    color_band_start: float = 35.0   # z of band bottom, mm (part coords)
+    color_band_height: float = 5.0   # band thickness, mm
+    color_band_extruder: int = 2     # filament/extruder painted onto the band
     profile: GridfinityProfile = GridfinityProfile()
 
     def __post_init__(self) -> None:
@@ -437,6 +447,17 @@ class BinConfig:
             step = 2 * self.lip_wall + 2 * self.profile.chamfer_top
             if min(self.width, self.length) - step <= 0:
                 raise ValueError("wall too thin for stacking lip")
+        # Only validate the color band when it is actually requested, so the
+        # disabled defaults never reject an otherwise-valid bin.
+        if self.color_band_enabled:
+            if self.color_band_height <= 0:
+                raise ValueError("color band height must be positive")
+            if self.color_band_extruder < 2:
+                raise ValueError("color band extruder must be >= 2")
+            lo, hi = self.base_height, self.total_height
+            if (self.color_band_start < lo - 1e-9
+                    or self.color_band_top > hi + 1e-9):
+                raise ValueError("color band outside the bin wall z-range")
 
     @property
     def base_height(self) -> float:
@@ -471,6 +492,11 @@ class BinConfig:
         if not self.stacking_lip:
             return 0.0
         return self.profile.total_height
+
+    @property
+    def color_band_top(self) -> float:
+        """Z of the band's top edge (band start + band height), mm (part coords)."""
+        return self.color_band_start + self.color_band_height
 
     @property
     def overall_height(self) -> float:

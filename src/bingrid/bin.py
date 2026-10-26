@@ -111,6 +111,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.set_defaults(stacking_lip=True)
 
+    band = parser.add_argument_group("color band")
+    band.add_argument(
+        "--3mf-paint", dest="three_mf_paint", action="store_true",
+        help="export the single bin as one mesh with a painted horizontal "
+             "color band assigned to filament 2 (Bambu paint_color .3mf); "
+             "independent of the stacking lip",
+    )
+    band.add_argument(
+        "--color-band-start", type=float, default=35.0,
+        help="z of the band bottom in part coords, mm (default: 35.0)",
+    )
+    band.add_argument(
+        "--color-band-height", type=float, default=5.0,
+        help="color band thickness, mm (default: 5.0)",
+    )
+    band.add_argument(
+        "--color-band-extruder", type=int, default=2,
+        help="filament/extruder painted onto the band (default: 2)",
+    )
+
     out = parser.add_argument_group("output")
     out.add_argument(
         "--output-dir", type=Path, default=Path(".output"),
@@ -138,6 +158,10 @@ def config_from_args(args: argparse.Namespace) -> BinConfig:
         lip_wall=args.lip_wall,
         base_overlap=args.base_overlap,
         stacking_lip=args.stacking_lip,
+        color_band_enabled=args.three_mf_paint,
+        color_band_start=args.color_band_start,
+        color_band_height=args.color_band_height,
+        color_band_extruder=args.color_band_extruder,
         profile=GridfinityProfile(
             top_opening=args.profile_top_opening,
             chamfer_top=args.profile_chamfer_top,
@@ -170,16 +194,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     name = args.name or exporter.bin_default_name(config)
     # --split-lip and --3mf both need the body/lip split; they may be requested
-    # together (write both the two STLs AND the .3mf) or independently. When
-    # neither is set, write the single combined STL/STEP.
+    # together (write both the two STLs AND the .3mf) or independently. --3mf-paint
+    # is a separate single-mesh path (independent of the lip). When none of the
+    # three is set, write the single combined STL/STEP.
+    paths = []
     if args.split_lip or args.three_mf:
         body, lip = bin_.build_split()
-        paths = []
         if args.split_lip:
             paths += exporter.export_split(body, lip, config, name=name)
         if args.three_mf:
             paths += exporter.export_3mf(body, lip, config, name=name)
-    else:
+    if args.three_mf_paint:
+        model = bin_.build()
+        paths += exporter.export_3mf_painted(model, config, name=name)
+    if not (args.split_lip or args.three_mf or args.three_mf_paint):
         model = bin_.build()
         paths = exporter.export(model, config, name=name)
 

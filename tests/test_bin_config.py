@@ -104,11 +104,34 @@ def test_cavity_bottom_sits_a_floor_above_the_feet(config_mod):
         ({"foot_clearance": 20.0}, "foot collapses"),
         # lip rim wall so thick the perimeter seat opening collapses (<=0)
         ({"lip_wall": 20.0}, "wall too thin for stacking lip"),
+        # color band validation (only enforced when the band is enabled)
+        ({"color_band_enabled": True, "color_band_height": 0}, "color band height"),
+        ({"color_band_enabled": True, "color_band_extruder": 1}, "color band extruder"),
+        ({"color_band_enabled": True, "color_band_start": 9000.0}, "outside the bin wall"),
     ],
 )
 def test_bin_config_rejects_bad_values(config_mod, kwargs, msg):
     with pytest.raises(ValueError, match=msg):
         config_mod.BinConfig(**kwargs)
+
+
+# --- color band defaults + valid enabled band ------------------------------
+
+def test_color_band_defaults(config_mod):
+    cfg = config_mod.BinConfig()
+    assert cfg.color_band_enabled is False
+    assert cfg.color_band_start == pytest.approx(35.0)
+    assert cfg.color_band_height == pytest.approx(5.0)
+    assert cfg.color_band_extruder == 2
+    assert cfg.color_band_top == pytest.approx(40.0)
+
+
+def test_valid_enabled_band_constructs(config_mod):
+    # units=6 -> total_height ~45.8, so the default 35..40 band sits on the wall.
+    cfg = config_mod.BinConfig(height_units=6, color_band_enabled=True)
+    assert cfg.color_band_enabled is True
+    assert cfg.base_height - 1e-9 <= cfg.color_band_start
+    assert cfg.color_band_top <= cfg.total_height + 1e-9
 
 
 # --- shared profile guards -------------------------------------------------

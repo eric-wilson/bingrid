@@ -6,8 +6,11 @@ convention lives in exactly one place (DRY / Single Responsibility).
 from __future__ import annotations
 
 import tempfile
+import uuid
+import zipfile
 from pathlib import Path
 from typing import List
+from xml.sax.saxutils import quoteattr
 
 import cadquery as cq
 
@@ -164,3 +167,204 @@ class ModelExporter:
             scene.export(str(out_path))
 
         return [out_path]
+
+    def export_3mf_painted(
+        self,
+        model: cq.Workplane,
+        config: BinConfig,
+        name: str | None = None,
+    ) -> List[Path]:
+        """Export the single bin solid as a Bambu-compatible painted ``.3mf``.
+
+        The whole bin is ONE mesh. A horizontal band of the outer wall
+        (``config.color_band_start .. config.color_band_top`` in part z) is
+        painted to a second filament/extruder via a Bambu per-triangle
+        ``paint_color`` attribute, the way a real Gridfinity bin paints its
+        colored rim. The base object is filament/extruder 1; band faces carry
+        ``paint_color="8"`` (extruder 2). This is the single-mesh alternative to
+        the two-body :meth:`export_3mf`.
+
+        Algorithm:
+
+        1. Tessellate the solid to a trimesh mesh through a temp STL (same
+           tolerances as the STL output, so surface quality matches).
+        2. Slice the mesh at the two band z-planes so NO triangle spans a band
+           boundary: for each plane, split into the pieces below and above and
+           concatenate them back. Faces that crossed a plane get subdivided
+           along it; the closed solid is preserved.
+        3. Classify each face by centroid z; faces whose centroid falls inside
+           the band get the simple whole-face paint code. Because slicing
+           removed every straddling triangle, centroid and all-vertex
+           classification agree, so each band face is just ``paint_color="8"``.
+        4. Write the OPC (zip) ``.3mf`` by hand (:meth:`_write_painted_3mf`):
+           trimesh's generic 3MF writer emits neither Bambu ``paint_color`` nor
+           ``Metadata/model_settings.config``, so it cannot carry the band.
+
+        The writer itself uses only stdlib ``zipfile`` / ElementTree-free string
+        XML + ``uuid``; trimesh is used only to tessellate and slice.
+        """
+        import numpy as np
+        import trimesh
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        base = name or self.bin_default_name(config)
+        out_path = self.output_dir / f"{base}.3mf"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stl_tmp = Path(tmp) / "painted.stl"
+            cq.exporters.export(
+                model,
+                str(stl_tmp),
+                tolerance=self.stl_tolerance,
+                angularTolerance=self.stl_angular_tolerance,
+            )
+            mesh = trimesh.load(str(stl_tmp), force="mesh")
+
+        b0 = config.color_band_start
+        b1 = config.color_band_top
+        mesh = self._slice_at_z(trimesh, mesh, b0)
+        mesh = self._slice_at_z(trimesh, mesh, b1)
+
+        # Classify by face-centroid z. After the two slices no triangle spans a
+        # boundary, so centroid classification matches the all-vertex test.
+        eps = 1e-6
+        centroid_z = np.asarray(mesh.triangles_center)[:, 2]
+        in_band = (centroid_z >= b0 - eps) & (centroid_z <= b1 + eps)
+
+        # Post-slice consistency guard: every face lies wholly on one side of
+        # each plane (all three vertices classify the same as the centroid).
+        tri_z = np.asarray(mesh.triangles)[:, :, 2]
+        vert_in = (tri_z >= b0 - eps) & (tri_z <= b1 + eps)
+        assert np.array_equal(vert_in.all(axis=1), in_band), (
+            "slice left a triangle straddling a band boundary"
+        )
+
+        # Bambu whole-face paint code: filament/extruder N -> (N << 2) in hex.
+        # The unpainted base is filament 1 (no attribute); filament 2 -> 2<<2 =
+        # 0b1000 -> "8" (the simple whole-face code this exporter emits).
+        paint_code = format(config.color_band_extruder << 2, "X")
+
+        self._write_painted_3mf(
+            out_path,
+            vertices=np.asarray(mesh.vertices, dtype=float),
+            faces=np.asarray(mesh.faces, dtype=int),
+            in_band=in_band,
+            paint_code=paint_code,
+            object_name=base,
+        )
+        return [out_path]
+
+    @staticmethod
+    def _slice_at_z(trimesh, mesh, z: float):
+        """Return a copy of ``mesh`` with faces split along the plane z=``z``.
+
+        Keeps the WHOLE closed solid (not a clip): slice once keeping the part
+        at or above the plane and once keeping the part at or below it (both
+        uncapped), then concatenate. Faces crossing z=``z`` are subdivided along
+        the plane; faces already on one side are preserved unchanged.
+        """
+        upper = trimesh.intersections.slice_mesh_plane(
+            mesh, plane_normal=[0, 0, 1], plane_origin=[0, 0, z], cap=False
+        )
+        lower = trimesh.intersections.slice_mesh_plane(
+            mesh, plane_normal=[0, 0, -1], plane_origin=[0, 0, z], cap=False
+        )
+        return trimesh.util.concatenate([lower, upper])
+
+    @staticmethod
+    def _write_painted_3mf(
+        out_path: Path,
+        vertices,
+        faces,
+        in_band,
+        paint_code: str,
+        object_name: str,
+    ) -> None:
+        """Write the minimal valid Bambu painted ``.3mf`` OPC package.
+
+        Parts written:
+
+        * ``[Content_Types].xml`` / ``_rels/.rels`` — standard OPC plumbing.
+        * ``3D/3dmodel.model`` — one object with an inline mesh; in-band
+          triangles carry ``paint_color`` = ``paint_code``; one build item.
+        * ``Metadata/model_settings.config`` — the object with base
+          ``extruder="1"`` and a single part, so the file loads mesh + paint
+          without the "invalid config" warning. No print/printer profile is
+          written (that is version-sensitive and the user applies their own).
+        """
+        name_attr = quoteattr(object_name)
+        obj_uuid = str(uuid.uuid4())
+        part_uuid = str(uuid.uuid4())
+        build_uuid = str(uuid.uuid4())
+        item_uuid = str(uuid.uuid4())
+        face_count = len(faces)
+
+        verts_xml = "".join(
+            f'<vertex x="{x:.6f}" y="{y:.6f}" z="{z:.6f}"/>'
+            for x, y, z in vertices
+        )
+        tri_parts = []
+        for i, (v1, v2, v3) in enumerate(faces):
+            paint = f' paint_color="{paint_code}"' if bool(in_band[i]) else ""
+            tri_parts.append(f'<triangle v1="{v1}" v2="{v2}" v3="{v3}"{paint}/>')
+        tris_xml = "".join(tri_parts)
+
+        model_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<model unit="millimeter" xml:lang="en-US" '
+            'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
+            'xmlns:BambuStudio="http://schemas.bambulab.com/package/2021" '
+            'xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">\n'
+            ' <metadata name="Application">bingrid</metadata>\n'
+            ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n'
+            ' <resources>\n'
+            f'  <object id="1" p:UUID="{obj_uuid}" type="model">\n'
+            '   <mesh>\n'
+            f'    <vertices>{verts_xml}</vertices>\n'
+            f'    <triangles>{tris_xml}</triangles>\n'
+            '   </mesh>\n'
+            '  </object>\n'
+            ' </resources>\n'
+            f' <build p:UUID="{build_uuid}">\n'
+            f'  <item objectid="1" p:UUID="{item_uuid}" '
+            'transform="1 0 0 0 1 0 0 0 1 0 0 0" printable="1"/>\n'
+            ' </build>\n'
+            '</model>\n'
+        )
+
+        settings_xml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<config>\n'
+            '  <object id="1">\n'
+            f'    <metadata key="name" value={name_attr}/>\n'
+            '    <metadata key="extruder" value="1"/>\n'
+            f'    <metadata face_count="{face_count}"/>\n'
+            f'    <part id="1" subtype="normal_part" uuid="{part_uuid}">\n'
+            f'      <metadata key="name" value={name_attr}/>\n'
+            '      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>\n'
+            '    </part>\n'
+            '  </object>\n'
+            '</config>\n'
+        )
+
+        content_types = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
+            ' <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n'
+            ' <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>\n'
+            '</Types>\n'
+        )
+
+        rels = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">\n'
+            ' <Relationship Target="/3D/3dmodel.model" Id="rel-1" '
+            'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n'
+            '</Relationships>\n'
+        )
+
+        with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("[Content_Types].xml", content_types)
+            zf.writestr("_rels/.rels", rels)
+            zf.writestr("3D/3dmodel.model", model_xml)
+            zf.writestr("Metadata/model_settings.config", settings_xml)

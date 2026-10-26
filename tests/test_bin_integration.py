@@ -554,6 +554,147 @@ def test_cli_3mf_without_lip_exits_2(bin_mod, tmp_path, capsys):
     assert not list(tmp_path.glob("*.3mf"))
 
 
+# --- --3mf-paint: single mesh with a painted color band -------------------
+
+def _read_zip_part(path, member):
+    """Return a named part of the ``.3mf`` zip decoded as text."""
+    import zipfile
+
+    with zipfile.ZipFile(path) as zf:
+        return zf.read(member).decode("utf-8")
+
+
+def _parse_painted_model(path):
+    """Parse the painted .3mf model into (vertices, [(v1,v2,v3,painted)])."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(_read_zip_part(path, "3D/3dmodel.model"))
+    ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+    verts = [
+        (float(v.get("x")), float(v.get("y")), float(v.get("z")))
+        for v in root.iterfind(".//m:vertices/m:vertex", ns)
+    ]
+    tris = []
+    for t in root.iterfind(".//m:triangles/m:triangle", ns):
+        tris.append((
+            int(t.get("v1")), int(t.get("v2")), int(t.get("v3")),
+            t.get("paint_color"),
+        ))
+    return verts, tris
+
+
+def test_export_3mf_painted_writes_valid_opc_package(gridfinity, tmp_path):
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6,
+                               color_band_enabled=True)
+    exporter = gridfinity.ModelExporter(tmp_path)
+    paths = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
+
+    threemfs = sorted(tmp_path.glob("*.3mf"))
+    assert len(threemfs) == 1
+    assert paths == threemfs
+    assert threemfs[0].name == f"{exporter.bin_default_name(cfg)}.3mf"
+    assert threemfs[0].stat().st_size > 0
+    assert zipfile.is_zipfile(threemfs[0])
+
+    with zipfile.ZipFile(threemfs[0]) as zf:
+        names = set(zf.namelist())
+    for part in ("3D/3dmodel.model", "Metadata/model_settings.config",
+                 "[Content_Types].xml", "_rels/.rels"):
+        assert part in names
+        ET.fromstring(_read_zip_part(threemfs[0], part))
+
+    # The temp tessellation STL must be cleaned up (no strays).
+    assert not list(tmp_path.glob("*.stl"))
+
+
+def test_painted_3mf_band_faces_use_paint_color_8(gridfinity, tmp_path):
+    cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6,
+                               color_band_enabled=True)
+    exporter = gridfinity.ModelExporter(tmp_path)
+    (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
+
+    _verts, tris = _parse_painted_model(path)
+    painted = [t for t in tris if t[3] == "8"]
+    unpainted = [t for t in tris if t[3] is None]
+    assert painted, "expected some band faces painted paint_color=8"
+    assert unpainted, "expected some base faces with no paint_color"
+
+    # Base object extruder is 1 in model_settings.config.
+    settings = _read_zip_part(path, "Metadata/model_settings.config")
+    assert '<metadata key="extruder" value="1"/>' in settings
+
+
+def test_painted_faces_fall_within_band_and_none_span_boundary(gridfinity, tmp_path):
+    cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6,
+                               color_band_enabled=True)
+    exporter = gridfinity.ModelExporter(tmp_path)
+    (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
+
+    verts, tris = _parse_painted_model(path)
+    b0, b1 = cfg.color_band_start, cfg.color_band_top
+    eps = 0.05  # tessellation tolerance
+
+    for v1, v2, v3, paint in tris:
+        zs = [verts[v1][2], verts[v2][2], verts[v3][2]]
+        if paint == "8":
+            # Every painted face lies wholly inside the band (within eps).
+            assert all(b0 - eps <= z <= b1 + eps for z in zs)
+        else:
+            # No unpainted face lies wholly strictly inside the band -> proves
+            # the pre-slice removed every straddling triangle.
+            assert not all(b0 + eps <= z <= b1 - eps for z in zs)
+
+
+def test_painted_3mf_geometry_is_watertight_and_matches_footprint(gridfinity, tmp_path):
+    import trimesh
+
+    cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6,
+                               color_band_enabled=True)
+    exporter = gridfinity.ModelExporter(tmp_path)
+    (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
+
+    mesh = trimesh.load(str(path), force="mesh")
+    assert mesh.is_watertight
+    assert mesh.extents[0] == pytest.approx(cfg.width, abs=0.3)
+    assert mesh.extents[1] == pytest.approx(cfg.length, abs=0.3)
+    assert mesh.extents[2] == pytest.approx(cfg.overall_height, abs=0.3)
+
+
+def test_cli_3mf_paint_writes_painted_3mf(gridfinity, bin_mod, tmp_path):
+    rc = bin_mod.main(
+        ["--x", "2", "--y", "1", "--units", "6", "--3mf-paint",
+         "--output-dir", str(tmp_path)]
+    )
+    assert rc == 0
+    threemfs = sorted(tmp_path.glob("*.3mf"))
+    assert len(threemfs) == 1
+    _verts, tris = _parse_painted_model(threemfs[0])
+    assert any(t[3] == "8" for t in tris)
+
+
+def test_cli_3mf_paint_band_outside_wall_exits_2(bin_mod, tmp_path, capsys):
+    rc = bin_mod.main(
+        ["--units", "3", "--3mf-paint", "--color-band-start", "500",
+         "--output-dir", str(tmp_path)]
+    )
+    assert rc == 2
+    assert "error:" in capsys.readouterr().out
+    assert not list(tmp_path.glob("*.3mf"))
+
+
+def test_cli_3mf_paint_height_zero_exits_2(bin_mod, tmp_path, capsys):
+    rc = bin_mod.main(
+        ["--units", "6", "--3mf-paint", "--color-band-height", "0",
+         "--output-dir", str(tmp_path)]
+    )
+    assert rc == 2
+    assert "error:" in capsys.readouterr().out
+    assert not list(tmp_path.glob("*.3mf"))
+
+
 def test_single_build_writes_one_stl(gridfinity, tmp_path):
     cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=5)
     exporter = gridfinity.ModelExporter(tmp_path)
