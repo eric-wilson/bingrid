@@ -225,6 +225,20 @@ class ModelExporter:
         mesh = self._slice_at_z(trimesh, mesh, b0)
         mesh = self._slice_at_z(trimesh, mesh, b1)
 
+        # Weld coincident vertices BEFORE classifying/writing. Slicing +
+        # concatenate leaves two independent vertex pools, so every seam vertex
+        # (and every vertex each half already had) exists twice: adjacent
+        # triangles across a seam reference different-but-coincident indices.
+        # trimesh.load merges these on load so is_watertight reports true, but
+        # Bambu's strict manifold check does NOT weld and sees each such shared
+        # edge as two boundary (open) edges. merge_vertices() collapses the
+        # coincident duplicates into one shared pool and process() normalizes
+        # winding, so the emitted mesh matches a real single-pool Bambu mesh.
+        # Classification MUST run after this, since welding changes the face
+        # indices and vertex count.
+        mesh.merge_vertices()
+        mesh.process(validate=True)
+
         # Classify by face-centroid z. After the two slices no triangle spans a
         # boundary, so centroid classification matches the all-vertex test.
         eps = 1e-6

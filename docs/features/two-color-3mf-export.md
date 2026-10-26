@@ -101,6 +101,13 @@ Notes:
 - Each band face carries the simple whole-face paint code (filament 2). The mesh
   is pre-sliced at the two band z-planes so no triangle spans a band edge, which
   keeps every painted face to the simple code (no recursive segmentation).
+- After slicing, the mesh is **welded into one shared vertex pool** (coincident
+  seam vertices merged, winding normalized) before it is written. Slicing leaves
+  duplicate vertices along the cut seams; trimesh merges those on load so it
+  reports the mesh watertight, but Bambu Studio's stricter check does not weld
+  and would otherwise see the unmerged seams as open edges and ask you to repair
+  the mesh with a third-party tool. Welding makes the painted `.3mf` load as a
+  watertight/manifold single mesh with the band in place, no repair needed.
 
 ### Geometry + paint only — no print profile
 

@@ -805,6 +805,56 @@ def test_painted_3mf_geometry_is_watertight_and_matches_footprint(gridfinity, tm
     assert mesh.extents[2] == pytest.approx(cfg.overall_height, abs=0.3)
 
 
+def test_painted_3mf_is_strictly_welded_and_manifold(gridfinity, tmp_path):
+    """The painted .3mf must be a single welded vertex pool with no open edges.
+
+    Reproduces the exact condition Bambu Studio flags: slicing + concatenate
+    used to leave coincident-but-unwelded duplicate vertices at the band seams,
+    so Bambu saw ~2392 open edges even though trimesh.load (which merges on
+    load) reported the mesh watertight. This asserts the FILE itself is already
+    welded: no duplicate positions, and every undirected edge is shared by
+    exactly two faces using the AS-WRITTEN indices (no welding in the test).
+    """
+    import numpy as np
+
+    cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5,
+                               color_band_enabled=True)
+    exporter = gridfinity.ModelExporter(tmp_path)
+    (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
+
+    verts, tris = _parse_painted_model(path)
+    V = np.array(verts, dtype=float)
+    F = np.array([(v1, v2, v3) for (v1, v2, v3, _paint) in tris], dtype=int)
+
+    # (a) No unwelded duplicate vertices: written count == unique-position count
+    # at a tight tolerance (well inside the 0.05 mm tessellation tolerance, so
+    # genuinely distinct vertices are never falsely merged by the assertion).
+    unique_pos, inverse = np.unique(np.round(V, 5), axis=0, return_inverse=True)
+    duplicate_count = len(V) - len(unique_pos)
+    assert duplicate_count == 0, (
+        f"{duplicate_count} coincident-unwelded duplicate vertices "
+        "(the condition Bambu flags as open edges)"
+    )
+
+    # (b) Strict manifold on the AS-WRITTEN indices: every undirected edge is
+    # shared by exactly two faces (0 open/non-manifold edges).
+    edges = np.sort(
+        np.vstack([F[:, [0, 1]], F[:, [1, 2]], F[:, [2, 0]]]), axis=1
+    )
+    _uniq_edges, counts = np.unique(edges, axis=0, return_counts=True)
+    bad_edges = int((counts != 2).sum())
+    assert bad_edges == 0, f"{bad_edges} edges not shared by exactly 2 faces"
+
+    # (c) Geometric closure confirmed through the unique-position map too:
+    # re-index faces onto welded positions and repeat the strict edge check.
+    Fp = inverse[F]
+    edges_p = np.sort(
+        np.vstack([Fp[:, [0, 1]], Fp[:, [1, 2]], Fp[:, [2, 0]]]), axis=1
+    )
+    _ue, counts_p = np.unique(edges_p, axis=0, return_counts=True)
+    assert int((counts_p != 2).sum()) == 0
+
+
 def test_cli_3mf_paint_writes_painted_3mf(gridfinity, bin_mod, tmp_path):
     rc = bin_mod.main(
         ["--x", "2", "--y", "1", "--units", "6", "--3mf-paint",
