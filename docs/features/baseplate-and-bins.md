@@ -60,8 +60,38 @@ Key dimensions (derived from the shared profile, verified against the spec):
 
 A single STL can't carry color. `--split-lip` exports the body and the stacking
 lip as two separate STL meshes (`..._body.stl`, `..._lip.stl`) sharing one
-footprint, so a slicer loads them as two objects for different filaments. A
-`.3mf` multi-body export is deferred.
+footprint and origin, so a slicer loads them pre-aligned (the lip sits exactly
+on top of the body) for a two-filament print — e.g. a black body with a blue
+lip.
+
+```bash
+# from src/
+python -m bingrid.bin --x 2 --y 1 --units 5 --stacking-lip --split-lip
+# writes ..._body.stl + ..._lip.stl (+ a combined .step for reference)
+```
+
+#### Combining the two STLs in Bambu Studio / OrcaSlicer
+
+The two meshes already share an origin, so do NOT re-center or "drop to bed"
+them individually — that shifts one relative to the other. Just combine them:
+
+- **Load body, add lip as a part:** import `..._body.stl`, then right-click it
+  in the object list → **Add part** → **Load...** → pick `..._lip.stl`. The lip
+  lands on top at its original coordinates. The result is one object with two
+  parts.
+- **Or import both, then assemble:** import both STLs (they load aligned),
+  shift-select them in the object list, right-click → **Assemble** (some
+  versions: *Merge into object parts*). This fuses them into one object without
+  moving them.
+
+Then select the **lip** part and assign it a different **filament/extruder**
+than the body. On a multi-color setup (AMS) it prints as one seamless object in
+two colors. If the lip ever looks offset, use **Assemble** to snap both back to
+their original coordinates.
+
+A `.3mf` multi-body export (one file, both bodies pre-separated and
+color-assignable, no manual combine step) is tracked separately — see
+[two-color-3mf-export.md](two-color-3mf-export.md).
 
 ## Tests
 
