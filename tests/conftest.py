@@ -33,3 +33,10 @@ def cli_mod():
     import bingrid.cli as m
 
     return m
+
+
+@pytest.fixture(scope="session")
+def bin_mod():
+    import bingrid.bin as m
+
+    return m

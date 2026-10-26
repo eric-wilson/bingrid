@@ -7,6 +7,19 @@ invalid configuration can never reach the geometry builder.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import NamedTuple
+
+
+class Plane(NamedTuple):
+    """One horizontal cross-section of a socket/foot/lip profile.
+
+    ``z`` is the offset measured from the profile bottom; ``size`` is the square
+    opening at that height. Returned as a ``NamedTuple`` so consumers can read
+    ``plane.z`` / ``plane.size`` while still unpacking/indexing like a tuple.
+    """
+
+    z: float
+    size: float
 
 
 @dataclass(frozen=True)
@@ -146,6 +159,41 @@ class GridfinityProfile:
     def bottom_opening(self) -> float:
         """Inner size at the bottom of the lower chamfer (narrowest), mm."""
         return self.top_opening - 2 * self.bottom_inset
+
+    def profile_planes(self) -> tuple[Plane, ...]:
+        """The socket cross-section as ordered (z, size) planes, bottom-up.
+
+        This is the single source of truth for the socket shape. The baseplate
+        socket, the bin foot (:meth:`foot_planes`), and the stacking lip all
+        derive from these four planes, so they mate by construction. ``z`` is
+        measured from the profile bottom:
+
+            * bottom of the lower chamfer (narrowest, ``bottom_opening``),
+            * bottom of the vertical section (``top_opening``),
+            * top of the vertical section (``top_opening``),
+            * the mouth at the top face (widest, ``mouth_opening``).
+        """
+        return (
+            Plane(0.0, self.bottom_opening),
+            Plane(self.chamfer_bottom, self.top_opening),
+            Plane(self.chamfer_bottom + self.straight, self.top_opening),
+            Plane(self.total_height, self.mouth_opening),
+        )
+
+    def foot_planes(self, clearance: float) -> tuple[Plane, ...]:
+        """The bin foot profile: the socket's solid mate, minus clearance.
+
+        The foot is the socket's solid complement (a male plug for the female
+        socket). It shares the socket's z orientation exactly -- narrow at low
+        z, wide at high z -- and each square ``size`` is reduced by
+        ``2*clearance`` so the foot drops into the socket with ``clearance`` of
+        gap per side. The ``z`` values are identical to :meth:`profile_planes`;
+        there is NO vertical flip (the "inverse" relationship is solid-vs-void,
+        not a z-mirror).
+        """
+        return tuple(
+            Plane(p.z, p.size - 2 * clearance) for p in self.profile_planes()
+        )
 
 
 @dataclass(frozen=True)
@@ -312,3 +360,121 @@ class GridConfig:
     @property
     def length(self) -> float:
         return self.grid_y * self.pitch
+
+
+@dataclass(frozen=True)
+class BinConfig:
+    """A Gridfinity bin: a hollow open-top container that plugs into a plate.
+
+    The bin's foot is the socket's solid mate (:meth:`GridfinityProfile.foot_planes`)
+    and its optional stacking lip is a miniature downward-opening socket in the
+    rim, so a bin stacks on a bin exactly as it seats on a baseplate. Footprint
+    is ``N*pitch - 0.5`` (0.25 mm per-side grid gap) so the bin drops into the
+    plate opening -- deliberately 0.5 mm smaller than ``GridConfig.width``.
+    """
+
+    HEIGHT_UNIT = 7.0  # mm per Gridfinity height unit
+
+    grid_x: int = 1              # Cells in X
+    grid_y: int = 1              # Cells in Y
+    height_units: int = 3        # Count of 7 mm Gridfinity height units
+    pitch: float = 42.0          # Cell pitch, mm
+    wall: float = 1.2            # Body wall thickness, mm
+    floor: float = 1.0           # Floor thickness above the foot, mm; 0 = open
+    foot_clearance: float = 0.25  # Per-side gap between foot and socket, mm
+    lip_clearance: float = 0.25  # Per-side seating gap inside the lip, mm
+    lip_wall: float = 1.2        # Outer wall of the stacking-lip rim ring, mm
+    base_overlap: float = 1.0    # mm the foot's mouth flare overlaps the body
+    stacking_lip: bool = True    # Build the stacking lip
+    profile: GridfinityProfile = GridfinityProfile()
+
+    def __post_init__(self) -> None:
+        if self.grid_x < 1 or self.grid_y < 1:
+            raise ValueError("grid dimensions must be at least 1x1")
+        if self.height_units < 1:
+            raise ValueError("height_units must be at least 1")
+        if self.pitch <= 0:
+            raise ValueError("pitch must be positive")
+        if self.wall <= 0:
+            raise ValueError("wall must be positive")
+        if self.floor < 0:
+            raise ValueError("floor cannot be negative")
+        if self.foot_clearance < 0:
+            raise ValueError("foot clearance cannot be negative")
+        if self.lip_clearance < 0:
+            raise ValueError("lip clearance cannot be negative")
+        if self.lip_wall <= 0:
+            raise ValueError("lip wall must be positive")
+        if self.base_overlap < 0:
+            raise ValueError("base overlap cannot be negative")
+        if self.base_overlap >= self.profile.total_height:
+            raise ValueError(
+                "base overlap must be less than the profile height"
+            )
+        if 2 * self.wall >= min(self.width, self.length):
+            raise ValueError("wall too thick; no interior left")
+        if self.inner_width <= 0 or self.inner_length <= 0:
+            raise ValueError("wall too thick; no interior left")
+        if self.floor >= self.total_height:
+            raise ValueError("floor must be less than the bin height")
+        if self.foot_clearance * 2 >= self.profile.bottom_opening:
+            raise ValueError("foot clearance too large; foot collapses")
+        if self.stacking_lip and self.width - 2 * self.lip_wall < self.profile.top_opening:
+            raise ValueError("wall too thin for stacking lip")
+
+    @property
+    def base_height(self) -> float:
+        """Height of the exposed foot that plugs into the socket, mm.
+
+        The foot is lofted over the full ``profile.total_height``; its top
+        ``base_overlap`` is buried inside the body, so only this much protrudes.
+        """
+        return self.profile.total_height - self.base_overlap
+
+    @property
+    def body_height(self) -> float:
+        """The usable body height (the Gridfinity height units), mm."""
+        return self.height_units * self.HEIGHT_UNIT
+
+    @property
+    def total_height(self) -> float:
+        """Top-of-body z (excludes the additive lip), mm."""
+        return self.base_height + self.body_height
+
+    @property
+    def lip_h(self) -> float:
+        """Height of the additive stacking lip (0 when disabled), mm."""
+        if not self.stacking_lip:
+            return 0.0
+        return self.profile.straight + self.profile.chamfer_top
+
+    @property
+    def overall_height(self) -> float:
+        """Actual top-of-part z a mesh measures (body + lip), mm."""
+        return self.total_height + self.lip_h
+
+    @property
+    def width(self) -> float:
+        return self.grid_x * self.pitch - 0.5
+
+    @property
+    def length(self) -> float:
+        return self.grid_y * self.pitch - 0.5
+
+    @property
+    def inner_width(self) -> float:
+        return self.width - 2 * self.wall
+
+    @property
+    def inner_length(self) -> float:
+        return self.length - 2 * self.wall
+
+    @property
+    def cavity_bottom(self) -> float:
+        """Z where the hollow interior starts.
+
+        Clamped to the top of the foot (``base_height``) so the cut only removes
+        material from the full-width body above the foot, never punches through
+        the narrower foot side walls (which would leave a non-manifold base).
+        """
+        return max(self.floor, self.base_height)

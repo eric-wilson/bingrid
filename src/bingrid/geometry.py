@@ -20,7 +20,35 @@ from typing import Iterator, List, Tuple
 
 import cadquery as cq
 
-from .config import GridConfig
+from .config import BinConfig, GridConfig, Plane
+
+
+def _loft_profile(
+    planes: Tuple[Plane, ...],
+    *,
+    base_z: float,
+    center: Tuple[float, float] = (0.0, 0.0),
+) -> cq.Workplane:
+    """Loft a square profile from its ordered ``planes``, bottom-up.
+
+    This is the single CadQuery call chain behind the baseplate socket, the bin
+    foot, and the stacking lip, so all three stay geometrically consistent by
+    construction. The call chain is pinned exactly: one leading
+    ``.workplane(offset=base_z)`` on a fresh ``cq.Workplane("XY")`` then the
+    first rect (the first plane's z is folded into ``base_z``, never issued as a
+    separate zero offset), one ``.workplane(offset=Δz).rect(...)`` per
+    subsequent plane, one ``.loft(combine=True)``, and always one final
+    ``.translate((cx, cy, 0))`` (a no-op translate is still emitted so socket,
+    foot, and lip share an identical chain).
+    """
+    if planes[0].z != 0:
+        raise ValueError("first profile plane must sit at z=0")
+
+    size0 = planes[0].size
+    wp = cq.Workplane("XY").workplane(offset=base_z).rect(size0, size0)
+    for prev, plane in zip(planes, planes[1:]):
+        wp = wp.workplane(offset=plane.z - prev.z).rect(plane.size, plane.size)
+    return wp.loft(combine=True).translate((center[0], center[1], 0))
 
 
 class PlateFeature(ABC):
@@ -80,28 +108,20 @@ class CellOpeningFeature(PlateFeature):
         height = config.resolved_height
         floor_top = cls._floor_top(config)
 
-        # Build the socket profile top-down. The mouth sits at the top face; the
-        # chamfers/vertical stack downward by their heights. Everything below the
-        # bottom chamfer is cut straight down to the floor (or 1mm past the base
-        # for an open floor) so a bin foot clears and the piece prints cleanly.
-        top_opening = p.top_opening
+        # The socket profile stacks from its narrow bottom up to the wide mouth
+        # at the top face. Everything below the bottom chamfer is cut straight
+        # down to the floor (or 1mm past the base for an open floor) so a bin
+        # foot clears and the piece prints cleanly.
         mouth = p.mouth_opening
         bottom = p.bottom_opening
 
-        z_mouth = height                      # top face
-        z_vert_top = height - p.chamfer_top    # top of vertical / bottom of mouth chamfer
-        z_vert_bot = z_vert_top - p.straight   # bottom of vertical
-        z_prof_bot = z_vert_bot - p.chamfer_bottom  # bottom of lower chamfer
+        z_prof_bot = height - p.total_height  # bottom of lower chamfer
 
-        # Lofted socket: bottom (narrow) -> vertical bottom/top (top_opening)
-        #                -> mouth (wide) at the top face.
-        socket = (
-            cq.Workplane("XY").workplane(offset=z_prof_bot).rect(bottom, bottom)
-            .workplane(offset=p.chamfer_bottom).rect(top_opening, top_opening)
-            .workplane(offset=p.straight).rect(top_opening, top_opening)
-            .workplane(offset=p.chamfer_top).rect(mouth, mouth)
-            .loft(combine=True)
-            .translate((cx, cy, 0))
+        # Lofted socket from the shared profile: bottom (narrow) -> vertical
+        # (top_opening) -> mouth (wide) at the top face. Using the shared
+        # ``_loft_profile`` helper keeps the socket, foot, and lip in lockstep.
+        socket = _loft_profile(
+            p.profile_planes(), base_z=z_prof_bot, center=(cx, cy)
         )
 
         # Straight shaft from the floor top up to the bottom of the socket, at
@@ -432,3 +452,192 @@ class GridfinityPlate:
         for feature in self.features:
             model = feature.apply(model, self.config)
         return model
+
+
+# =========================================================================
+# Gridfinity bin builder
+# =========================================================================
+
+
+class BinFeature(ABC):
+    """A transformation applied to the bin solid.
+
+    A sibling of :class:`PlateFeature` typed against :class:`BinConfig` rather
+    than :class:`GridConfig`, so each builder's feature list stays type-correct
+    and self-documenting. Adding a bin feature means adding a class.
+    """
+
+    @abstractmethod
+    def apply(self, model: cq.Workplane, config: BinConfig) -> cq.Workplane:
+        """Return a new solid with this feature applied."""
+        raise NotImplementedError
+
+
+def _bin_cell_centers(config: BinConfig) -> Iterator[Tuple[int, int, float, float]]:
+    """Yield (i, j, cx, cy) for every bin cell, centered on the origin.
+
+    Foot centers use the full ``grid*pitch`` PITCH lattice (NOT the undersized
+    bin ``width = grid_x*pitch - 0.5``) so a multi-cell bin's feet register with
+    the plate's sockets, which sit on the pitch lattice.
+    """
+    for i in range(config.grid_x):
+        for j in range(config.grid_y):
+            cx = -config.grid_x * config.pitch / 2 + (i + 0.5) * config.pitch
+            cy = -config.grid_y * config.pitch / 2 + (j + 0.5) * config.pitch
+            yield i, j, cx, cy
+
+
+class BinBodyFeature(BinFeature):
+    """The outer body box, spanning z=base_height..total_height.
+
+    MUST be the first feature: ``GridfinityBin.build`` seeds an empty workplane,
+    so this feature disregards the (empty) incoming model and returns a freshly
+    built box. Every later feature unions/cuts onto a non-empty solid.
+    """
+
+    def apply(self, model: cq.Workplane, config: BinConfig) -> cq.Workplane:
+        return (
+            cq.Workplane("XY")
+            .box(
+                config.width,
+                config.length,
+                config.body_height,
+                centered=(True, True, False),
+            )
+            .translate((0, 0, config.base_height))
+        )
+
+
+class BinFootFeature(BinFeature):
+    """The foot plug under each cell: the socket's solid mate.
+
+    The foot shares the socket's z orientation (narrow at low z, wide at high
+    z); it is the socket's SOLID complement, not a z-flipped profile. Lofted
+    over z=0..profile.total_height at each pitch-lattice cell center, its top
+    ``base_overlap`` is buried in the body so only ``base_height`` protrudes to
+    plug into the socket.
+    """
+
+    def apply(self, model: cq.Workplane, config: BinConfig) -> cq.Workplane:
+        planes = config.profile.foot_planes(config.foot_clearance)
+        for _i, _j, cx, cy in _bin_cell_centers(config):
+            foot = _loft_profile(planes, base_z=0.0, center=(cx, cy))
+            model = model.union(foot)
+        return model
+
+
+class HollowInteriorFeature(BinFeature):
+    """Cuts the open-top cavity from ``cavity_bottom`` up through the mouth.
+
+    The cut box is ``inner_width x inner_length`` and runs from
+    ``config.cavity_bottom`` (= max(floor, base_height)) up to the top face
+    plus a 1 mm over-cut so the mouth punches cleanly. The lip sits above
+    ``total_height`` so the cavity cut never touches it.
+    """
+
+    def apply(self, model: cq.Workplane, config: BinConfig) -> cq.Workplane:
+        bottom = config.cavity_bottom
+        height = config.total_height - bottom + 1.0  # +1 mm over-cut
+        cavity = (
+            cq.Workplane("XY")
+            .box(
+                config.inner_width,
+                config.inner_length,
+                height,
+                centered=(True, True, False),
+            )
+            .translate((0, 0, bottom))
+        )
+        return model.cut(cavity)
+
+
+class StackingLipFeature(BinFeature):
+    """A downward-opening miniature socket cut into an additive rim ring.
+
+    Entirely additive above z=total_height: a solid rim ring (outer =
+    width x length) occupies z=total_height..total_height+lip_h, then the
+    downward-opening lip profile is cut from it so a stacked bin's foot drops in
+    exactly as a foot seats in a plate socket. The lip's vertical seating cut is
+    the profile's ``top_opening`` (= the plate socket vertical), so a 37.0 foot
+    clears the 37.5 cut by foot_clearance per side. Self-skips when the config
+    disables the lip. Runs last so it attaches to the finished wall.
+    """
+
+    def apply(self, model: cq.Workplane, config: BinConfig) -> cq.Workplane:
+        if not config.stacking_lip:
+            return model
+        return model.union(self.lip_solid(config))
+
+    @staticmethod
+    def lip_solid(config: BinConfig) -> cq.Workplane:
+        """The lip ring (with its downward cut) in world coordinates."""
+        p = config.profile
+        z0 = config.total_height
+        ring = (
+            cq.Workplane("XY")
+            .box(
+                config.width,
+                config.length,
+                config.lip_h,
+                centered=(True, True, False),
+            )
+            .translate((0, 0, z0))
+        )
+        # Downward-opening lip cut, bottom-up from the ring bottom:
+        #   mouth (clamped to the footprint) at offset 0,
+        #   vertical seat (top_opening) across the straight+chamfer run.
+        mouth_cut = min(p.mouth_opening, config.width - 2 * config.lip_wall)
+        planes = (
+            Plane(0.0, mouth_cut),
+            Plane(p.chamfer_top, p.top_opening),
+            Plane(config.lip_h, p.top_opening),
+        )
+        cut = _loft_profile(planes, base_z=z0, center=(0.0, 0.0))
+        # Over-cut 1 mm above the ring top so the seat punches cleanly.
+        over_top = (
+            cq.Workplane("XY")
+            .box(p.top_opening, p.top_opening, 1.0, centered=(True, True, False))
+            .translate((0, 0, z0 + config.lip_h))
+        )
+        return ring.cut(cut).cut(over_top)
+
+
+class GridfinityBin:
+    """Builds a hollow open-top Gridfinity bin solid from a :class:`BinConfig`."""
+
+    def __init__(self, config: BinConfig, features: List[BinFeature] | None = None):
+        self.config = config
+        # Default pipeline. BinBodyFeature MUST stay first (it builds the body
+        # from an empty seed); every later feature unions/cuts onto it. The lip
+        # feature self-skips when stacking_lip is False.
+        self.features = features or [
+            BinBodyFeature(),
+            BinFootFeature(),
+            HollowInteriorFeature(),
+            StackingLipFeature(),
+        ]
+
+    def build(self) -> cq.Workplane:
+        """Full bin: body + foot + hollow interior + optional lip."""
+        model = cq.Workplane("XY")
+        for feature in self.features:
+            model = feature.apply(model, self.config)
+        return model
+
+    def build_split(self) -> Tuple[cq.Workplane, cq.Workplane]:
+        """Return (body_without_lip, lip) split along the z=total_height plane.
+
+        The body runs the pipeline with :class:`StackingLipFeature` omitted; the
+        lip is built standalone in world coordinates so the two meshes load
+        pre-aligned. Raises ``ValueError`` when there is no lip to split.
+        """
+        if not self.config.stacking_lip:
+            raise ValueError("no stacking lip to split")
+        body_features = [
+            f for f in self.features if not isinstance(f, StackingLipFeature)
+        ]
+        body = cq.Workplane("XY")
+        for feature in body_features:
+            body = feature.apply(body, self.config)
+        lip = StackingLipFeature.lip_solid(self.config)
+        return body, lip
