@@ -37,11 +37,16 @@ def test_inspector_normalizes_to_origin(meshtools):
 
 def test_slice_reports_hole(meshtools):
     import trimesh
+    from shapely.geometry import Polygon
 
-    # A plate with a hole: slicing mid-height should report one interior hole.
-    outer = trimesh.creation.box(extents=(20.0, 20.0, 4.0))
-    hole = trimesh.creation.box(extents=(6.0, 6.0, 10.0))
-    plate = outer.difference(hole)
+    # A plate with a hole, built by extruding a 2D polygon that has an interior
+    # ring. This avoids needing a mesh-boolean backend (manifold/blender), so
+    # the test runs anywhere trimesh's 2D extras are installed.
+    outer = [(-10, -10), (10, -10), (10, 10), (-10, 10)]
+    hole = [(-3, -3), (3, -3), (3, 3), (-3, 3)]
+    plate = trimesh.creation.extrude_polygon(
+        Polygon(outer, holes=[hole]), height=4.0
+    )
     insp = meshtools.MeshInspector(plate)
     prof = insp.slice_at(2.0, axis="z")
     assert prof is not None

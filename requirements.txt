@@ -1,7 +1,10 @@
 cadquery
 # Mesh inspection tool (meshtools). shapely + networkx back trimesh's 2D
-# section/polygon analysis used to profile reference parts.
+# section/polygon analysis used to profile reference parts. mapbox_earcut is
+# the (permissively licensed) triangulation engine trimesh needs to extrude
+# polygons with interior rings — used to build holed test fixtures in-memory.
 trimesh
 shapely
 networkx
 rtree
+mapbox_earcut
