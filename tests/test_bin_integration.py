@@ -396,6 +396,108 @@ def test_lip_seat_steps_inward_from_the_mouth(gridfinity, tmp_path):
     assert seat_l > cfg.inner_length - 2 * p.chamfer_top - 1.5
 
 
+def _section_interior_xy(insp, z):
+    """Return (xs, ys) of the largest INTERIOR (hole) ring at height ``z``.
+
+    The complement of :func:`_section_exterior_xy`: it reads the interior ring
+    of the dominant polygon -- the opening we want to prove is rounded. Returns
+    ``None`` when trimesh's 2D section extras are unavailable or there is no
+    hole, so the caller can skip cleanly.
+    """
+    import numpy as np
+
+    section = insp.mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
+    if section is None:
+        return None
+    planar, _ = section.to_2D()
+    try:
+        polygons = planar.polygons_full
+    except BaseException:
+        return None
+    if not polygons:
+        return None
+    poly = max(polygons, key=lambda p: p.area)
+    if not list(poly.interiors):
+        return None
+    ring = max(poly.interiors, key=lambda r: r.length)
+    xs, ys = ring.xy
+    return np.asarray(xs), np.asarray(ys)
+
+
+# --- interior opening corners are rounded, concentric with the outer -------
+
+def test_interior_lip_opening_corners_are_rounded(gridfinity, tmp_path):
+    """The lip's inner opening corners are ROUNDED, not sharp 90 deg squares.
+
+    This FAILS on the pre-fix lip (the opening was cut from sharp ``_rect_loft``
+    rectangles): the interior ring's +x+y corner held essentially no arc points
+    and ``_fit_corner_arc`` returned None. After the fix the opening is swept
+    from rounded-rect profiles, so the inner corner fits a POSITIVE radius in
+    the ~2 mm ballpark and the ring carries many points. The fitted arc center
+    is CONCENTRIC with the outer corner (same center as the body footprint
+    corner) -- a uniform wall wrapping the rounded corner.
+    """
+    cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5)
+    assert cfg.stacking_lip and cfg.corner_radius > 0
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+
+    # Near the top rim, inside the flared mouth where the opening is widest.
+    z = cfg.overall_height - 0.3
+    ring = _section_interior_xy(insp, z)
+    if ring is None:
+        pytest.skip("trimesh 2D section extras unavailable")
+
+    xs, ys = ring
+    # Many ring points: a rounded corner adds an arc; a sharp square has ~4.
+    assert len(xs) > 20, "interior lip opening corner is sharp, not rounded"
+
+    fit = _fit_corner_arc(xs, ys)
+    assert fit is not None, "interior lip opening corner is sharp, not rounded"
+    xc, yc, r = fit
+    # Rounded in the expected concentric ballpark (~2 mm for the default rim),
+    # positive and well under the outer 3.75.
+    assert 0.5 < r < cfg.corner_radius
+    assert r == pytest.approx(2.0, abs=1.0)
+    # Concentric with the OUTER corner: the fitted inner arc center coincides
+    # with the body footprint corner center (|x|,|y| = half - corner_radius).
+    body_cc_x = cfg.width / 2 - cfg.corner_radius
+    body_cc_y = cfg.length / 2 - cfg.corner_radius
+    assert abs(xc) == pytest.approx(body_cc_x, abs=0.6)
+    assert abs(yc) == pytest.approx(body_cc_y, abs=0.6)
+
+
+def test_interior_cavity_corners_are_rounded_and_concentric(gridfinity, tmp_path):
+    """The hollow cavity's inner opening corners are rounded & concentric.
+
+    This FAILS on the pre-fix cavity (a sharp ``.box()`` cut): the interior ring
+    mid-body fit no corner arc (None). After the fix the cavity corners are
+    filleted to ``cavity_corner_radius`` (= corner_radius - wall), so the inner
+    ring fits a positive radius whose arc center matches the body's outer corner
+    center (concentric -> uniform wall thickness around the corner).
+    """
+    cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5)
+    assert cfg.cavity_corner_radius > 0
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+
+    z = cfg.base_height + cfg.body_height / 2  # mid-body, clear of foot & lip
+    ring = _section_interior_xy(insp, z)
+    if ring is None:
+        pytest.skip("trimesh 2D section extras unavailable")
+
+    xs, ys = ring
+    assert len(xs) > 20, "interior cavity corner is sharp, not rounded"
+    fit = _fit_corner_arc(xs, ys)
+    assert fit is not None, "interior cavity corner is sharp, not rounded"
+    xc, yc, r = fit
+    # Matches the derived concentric cavity radius (corner_radius - wall).
+    assert r == pytest.approx(cfg.cavity_corner_radius, abs=0.5)
+    # Concentric with the outer body corner (same arc center).
+    body_cc_x = cfg.width / 2 - cfg.corner_radius
+    body_cc_y = cfg.length / 2 - cfg.corner_radius
+    assert abs(xc) == pytest.approx(body_cc_x, abs=0.6)
+    assert abs(yc) == pytest.approx(body_cc_y, abs=0.6)
+
+
 def test_no_lip_leaves_no_rim_above_total_height(gridfinity, tmp_path):
     cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5, stacking_lip=False)
     insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)

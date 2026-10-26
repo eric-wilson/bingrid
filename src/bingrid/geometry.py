@@ -100,6 +100,54 @@ def _rounded_rect_wire(
     return cq.Wire.assembleEdges(edges)
 
 
+def _rounded_rect_wire_wl(
+    w: float, l: float, radius: float, z: float, cx: float, cy: float
+) -> cq.Wire:
+    """A ``w`` x ``l`` rectangle wire with rounded corners, at height ``z``.
+
+    The rectangular sibling of :func:`_rounded_rect_wire` (which rounds a
+    square). Centered on ``(cx, cy)``; the four corners are 90 deg arcs of
+    ``radius`` whose centers sit at ``(+-(w/2 - r), +-(l/2 - r))``. Clamped so
+    ``radius`` never exceeds half the shorter side. ``radius <= 0`` yields a
+    sharp rectangle. Used to sweep a rounded interior opening (lip cavity) whose
+    corners stay concentric with the outer rounded corners.
+    """
+    hw, hl = w / 2.0, l / 2.0
+    r = max(0.0, min(radius, hw, hl))
+
+    def v(x: float, y: float) -> cq.Vector:
+        return cq.Vector(cx + x, cy + y, z)
+
+    if r <= 1e-9:
+        pts = [(-hw, -hl), (hw, -hl), (hw, hl), (-hw, hl), (-hw, -hl)]
+        return cq.Wire.makePolygon([v(*p) for p in pts])
+
+    ax = hw - r  # corner-arc center offset in x
+    ay = hl - r  # corner-arc center offset in y
+
+    def arc(center: Tuple[float, float],
+            start: Tuple[float, float],
+            end: Tuple[float, float]) -> cq.Edge:
+        dx = (start[0] - center[0]) + (end[0] - center[0])
+        dy = (start[1] - center[1]) + (end[1] - center[1])
+        n = math.hypot(dx, dy)
+        mid = (center[0] + r * dx / n, center[1] + r * dy / n)
+        return cq.Edge.makeThreePointArc(v(*start), v(*mid), v(*end))
+
+    line = lambda p0, p1: cq.Edge.makeLine(v(*p0), v(*p1))  # noqa: E731
+    edges = [
+        line((-ax, -hl), (ax, -hl)),           # bottom straight
+        arc((ax, -ay), (ax, -hl), (hw, -ay)),  # bottom-right corner
+        line((hw, -ay), (hw, ay)),             # right straight
+        arc((ax, ay), (hw, ay), (ax, hl)),     # top-right corner
+        line((ax, hl), (-ax, hl)),             # top straight
+        arc((-ax, ay), (-ax, hl), (-hw, ay)),  # top-left corner
+        line((-hw, ay), (-hw, -ay)),           # left straight
+        arc((-ax, -ay), (-hw, -ay), (-ax, -hl)),  # bottom-left corner
+    ]
+    return cq.Wire.assembleEdges(edges)
+
+
 def _loft_rounded_foot(
     planes: Tuple[Plane, ...],
     corner_radius,
@@ -640,16 +688,24 @@ class HollowInteriorFeature(BinFeature):
     def apply(self, model: cq.Workplane, config: BinConfig) -> cq.Workplane:
         bottom = config.cavity_bottom
         height = config.total_height - bottom + 1.0  # +1 mm over-cut
-        cavity = (
-            cq.Workplane("XY")
-            .box(
-                config.inner_width,
-                config.inner_length,
-                height,
-                centered=(True, True, False),
-            )
-            .translate((0, 0, bottom))
+        cavity = cq.Workplane("XY").box(
+            config.inner_width,
+            config.inner_length,
+            height,
+            centered=(True, True, False),
         )
+        # Round the cavity's four inner vertical corners CONCENTRIC with the
+        # outer body corners (a real Gridfinity interior is rounded, not a sharp
+        # square). The cavity box is inset ``wall`` per side from the footprint
+        # and shares its center, so filleting the ``|Z`` edges to
+        # ``cavity_corner_radius`` (= corner_radius - wall) keeps the inner arc
+        # centers on the same vertical line as the outer corners -- uniform wall
+        # thickness around the corner. Guarded on > 0 so a sharp outer (or a
+        # wall >= corner_radius) keeps the old square cavity.
+        cr = config.cavity_corner_radius
+        if cr > 0:
+            cavity = cavity.edges("|Z").fillet(cr)
+        cavity = cavity.translate((0, 0, bottom))
         return model.cut(cavity)
 
 
@@ -675,6 +731,35 @@ def _rect_loft(
     for (pz, _pw, _pl), (z, w, l) in zip(sizes, sizes[1:]):
         wp = wp.workplane(offset=z - pz).rect(w, l)
     return wp.loft(combine=True).translate((center[0], center[1], 0))
+
+
+def _rounded_rect_loft(
+    sizes: Tuple[Tuple[float, float, float], ...],
+    corner_radius,
+    *,
+    base_z: float,
+    center: Tuple[float, float] = (0.0, 0.0),
+) -> cq.Workplane:
+    """Loft a rounded-rect profile from ordered ``(z, w, l)`` planes, bottom-up.
+
+    The rounded-corner sibling of :func:`_rect_loft`. ``corner_radius`` is a
+    callable mapping a plane's ``(w, l)`` to that plane's corner radius, so the
+    interior opening's corners stay CONCENTRIC with the outer corners at every
+    level (the radius shrinks per side as the opening narrows, keeping one arc
+    center line). Lofting explicit rounded-rect wires (``ruled=True`` straight
+    blend, matching :func:`_rect_loft`) yields a watertight cut tool whose inner
+    vertical corners are rounded. ``z`` of the first plane must be 0.
+    """
+    z0, w0, l0 = sizes[0]
+    if z0 != 0:
+        raise ValueError("first profile plane must sit at z=0")
+    cx, cy = center
+    wires = [
+        _rounded_rect_wire_wl(w, l, corner_radius(w, l), base_z + z, cx, cy)
+        for (z, w, l) in sizes
+    ]
+    solid = cq.Solid.makeLoft(wires, ruled=True)
+    return cq.Workplane("XY").newObject([solid])
 
 
 class StackingLipFeature(BinFeature):
@@ -771,7 +856,24 @@ class StackingLipFeature(BinFeature):
             (straight_top, seat_w, seat_l),   # top of the vertical seat run
             (config.lip_h, mouth_w, mouth_l),  # flared mouth at the top face
         )
-        cavity = _rect_loft(sizes, base_z=z0, center=(0.0, 0.0))
+        # The lip opening's inner corners are ROUNDED CONCENTRIC with the outer
+        # rim corners, exactly like the body cavity below -- a real Gridfinity
+        # lip has a rounded inner opening, not a sharp square. Each plane's
+        # opening (w, l) is inset ``(width - w)/2`` per side from the footprint
+        # (same inset on both axes: the mouth/seat step in symmetrically), so
+        # its concentric corner radius is ``corner_radius - inset``, derived via
+        # ``BinConfig.interior_corner_radius`` (DRY; no second radius constant).
+        # At r=0 this falls back to the sharp rect loft.
+        if config.corner_radius > 0:
+            def _lip_corner_radius(w: float, l: float) -> float:
+                inset = (config.width - w) / 2.0
+                return config.interior_corner_radius(inset, min(w, l))
+
+            cavity = _rounded_rect_loft(
+                sizes, _lip_corner_radius, base_z=z0, center=(0.0, 0.0)
+            )
+        else:
+            cavity = _rect_loft(sizes, base_z=z0, center=(0.0, 0.0))
         # Over-cut 1 mm above the ring top so the mouth punches cleanly.
         over_top = (
             cq.Workplane("XY")

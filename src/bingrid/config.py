@@ -480,6 +480,40 @@ class BinConfig:
         top_size = self.profile.foot_planes(self.foot_clearance)[-1].size
         return top_size / 2.0
 
+    def interior_corner_radius(self, inset: float, opening: float) -> float:
+        """Radius for an interior opening inset ``inset`` per side, mm.
+
+        The interior opening corners are CONCENTRIC with the body's rounded
+        outer corners (the single ``corner_radius`` reference -- DRY, no second
+        radius). An outer corner of radius ``corner_radius`` on the footprint
+        half-size ``H`` has its arc center at ``H - corner_radius`` from the
+        bin center. An interior opening is inset ``inset`` per side, so its
+        half-size is ``H - inset``; sharing the same corner center means::
+
+            (H - inset) - r == H - corner_radius
+
+        so ``r = corner_radius - inset``. That keeps a uniform wall thickness
+        wrapping the rounded corner (the outer and inner arcs are concentric),
+        and lands around ~2 mm for the default wall/rim. Clamped to
+        ``[0, opening/2]``: a sharp corner where the inset would drive it
+        negative, never larger than half the opening. This is the interior
+        analogue of :meth:`foot_corner_radius` (same concentric-corner thinking).
+        """
+        if self.corner_radius <= 0:
+            return 0.0
+        r = self.corner_radius - inset
+        return max(0.0, min(r, opening / 2.0))
+
+    @property
+    def cavity_corner_radius(self) -> float:
+        """Interior corner radius of the hollow cavity, mm.
+
+        The cavity is inset ``wall`` per side from the outer footprint, so its
+        rounded corners are ``corner_radius - wall`` (concentric with the outer
+        corners). Derived, not a new constant.
+        """
+        return self.interior_corner_radius(self.wall, min(self.inner_width, self.inner_length))
+
     def foot_corner_radius(self, foot_size: float) -> float:
         """Corner radius for a foot cross-section of width ``foot_size``, mm.
 

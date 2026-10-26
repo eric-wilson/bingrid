@@ -42,6 +42,17 @@ Key dimensions (derived from the shared profile, verified against the spec):
   outer footprint / corner center). Configurable via `--corner-radius`
   (default 3.75, `0` = sharp); rounding only removes material inside the
   footprint, so the bounding box stays `N*42 - 0.5` unchanged.
+- **Rounded interior opening:** the **inner** opening corners — the hollow
+  cavity *and* the stacking-lip's inner opening — are also **rounded concentric
+  with the outer corners** (real Gridfinity), not left sharp 90° squares, so the
+  wall keeps a uniform thickness wrapping each corner. Each interior radius is
+  **derived** from the single `corner_radius` by subtracting that opening's
+  per-side inset (same concentric-corner thinking as the foot, no second radius
+  constant): the cavity is `corner_radius - wall` (≈ **2 mm** for the default
+  wall), and the lip opening tapers from the seat up to ~2 mm at the mouth near
+  the top rim. Clamped to ≥ 0 (a thick wall/sharp outer falls back to a square
+  interior). (An earlier version cut the interior from sharp rectangles, so the
+  inner corners were square while the outer were rounded; fixed.)
 - **Height:** 7 mm per unit + ~3.8 mm base. `--units 6` body = 45.8 mm tall.
 - **Foot:** the socket's **solid complement** (a male plug) — same z-orientation
   as the socket (narrow at low z, wide at high z), NOT a vertical mirror. The
