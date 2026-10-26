@@ -4,3 +4,4 @@ cadquery
 trimesh
 shapely
 networkx
+rtree

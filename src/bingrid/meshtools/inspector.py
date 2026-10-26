@@ -101,7 +101,13 @@ class MeshInspector:
             return None
         planar, _ = section.to_2D()
 
-        polygons = planar.polygons_full
+        # ``polygons_full`` needs trimesh's optional 2D extras (shapely, rtree).
+        # If they are missing or the section is degenerate, treat the slice as
+        # empty rather than crashing the whole sweep.
+        try:
+            polygons = planar.polygons_full
+        except BaseException:  # trimesh raises a lazily-constructed ImportError
+            return None
         if not polygons:
             return None
 
