@@ -62,52 +62,83 @@ than the body; on a multi-color setup (AMS) it prints as one seamless object in
 two colors (e.g. a black body with a blue lip). This is the single-file
 alternative to combining the two `--split-lip` STLs by hand.
 
-## The `--3mf-paint` flag — single-mesh painted color band
+## The `--3mf-paint` flag — single-mesh painted bin
 
 `--3mf-paint` is a different take on two colors: instead of two separate bodies,
-it exports the bin as **one single mesh** and paints a **horizontal color band**
-around the outer wall, assigning that band to a second filament/extruder with a
-Bambu per-triangle `paint_color` attribute — the way a real Gridfinity bin
-paints its colored rim.
+it exports the bin as **one single mesh** and paints one region to a second
+filament/extruder with a Bambu per-triangle `paint_color` attribute — the way a
+real Gridfinity bin paints its colored rim.
+
+### Default: paint the stacking LIP
+
+By default `--3mf-paint` paints the **stacking lip** — the top rim, everything
+at or above the lip/body seam (`z >= total_height`). The lip is the **last
+region printed**, so coloring it means a **single color change near the top**
+and a clean two-tone "black body, colored rim". This is the look a real
+Gridfinity bin has, and it avoids the confusing mid-wall stripe.
 
 ```bash
 # from src/
 python -m bingrid.bin --x 2 --y 1 --units 6 --3mf-paint
-# writes one bin_2x1_u6_lip_floor1.0.3mf: one mesh, an auto-centered band on
-# filament 2, the rest on filament 1
+# writes one bin_2x1_u6_lip_floor1.0.3mf: one mesh, the lip on filament 2,
+# the rest (body + foot) on filament 1
 ```
 
-Flags:
+- `--3mf-paint` in its default lip mode **requires a stacking lip** (there is
+  nothing to paint without one). `--3mf-paint --no-stacking-lip` is an error and
+  exits with code 2, mirroring the `--3mf` / `--split-lip` lip guard. Use
+  `--color-band` (below) to paint the wall without a lip.
+- `--color-band-extruder` sets the filament/extruder painted onto the lip
+  (default `2`).
 
-- `--3mf-paint` turns the painted export on. It is a single-mesh path, separate
-  from the two-body `--3mf`.
+### Opt-in: paint a mid-wall color band
+
+Pass `--color-band` to switch `--3mf-paint` from lip mode into the legacy
+**mid-wall horizontal band** mode. The band is a strip of the outer wall
+assigned to the second filament.
+
+```bash
+# from src/
+python -m bingrid.bin --x 2 --y 1 --units 6 --3mf-paint --color-band
+# writes one mesh with an auto-centered wall band on filament 2
+python -m bingrid.bin --x 2 --y 1 --units 6 --3mf-paint --color-band \
+    --color-band-start 15 --color-band-height 6
+# band placed explicitly at part z = 15..21 mm
+```
+
+Band-mode flags (only meaningful with `--color-band`):
+
 - `--color-band-start` — z of the band bottom in part coordinates, mm. Part z is
   measured from the body base (the wall rises from `base_height` to
   `total_height`). **Omit it to auto-position** the band centered in the wall,
-  which fits any bin height; pass a value to place it explicitly (e.g. to match
-  the real Gridfinity rim look).
+  which fits any bin height; pass a value to place it explicitly.
 - `--color-band-height` — band thickness, mm (default `5.0`).
 - `--color-band-extruder` — the filament/extruder painted onto the band
-  (default `2`).
+  (default `2`), shared with lip mode.
 
-Notes:
+Band-mode notes:
 
-- It is **independent of the stacking lip** — the band is on the wall and works
-  with or without a lip (no `--3mf --no-stacking-lip`-style guard).
-- By default the band **auto-centers in the wall** span and fits on any bin
+- Band mode is **independent of the stacking lip** — the band is on the wall and
+  works with or without a lip, so `--3mf-paint --color-band --no-stacking-lip`
+  is allowed.
+- The band **auto-centers in the wall** span by default and fits on any bin
   height, so no start value is needed. An explicit `--color-band-start` that
   falls outside the wall z-range, or a `--color-band-height` taller than the
   whole wall, exits with code 2.
-- Each band face carries the simple whole-face paint code (filament 2). The mesh
-  is pre-sliced at the two band z-planes so no triangle spans a band edge, which
-  keeps every painted face to the simple code (no recursive segmentation).
+
+### Shared mechanism (both modes)
+
+- Each painted face carries the simple whole-face paint code (filament 2). The
+  mesh is pre-sliced at the mode's z-plane(s) — the single lip/body seam in lip
+  mode, or the two band planes in band mode — so no triangle spans a paint edge,
+  which keeps every painted face to the simple code (no recursive segmentation).
 - After slicing, the mesh is **welded into one shared vertex pool** (coincident
   seam vertices merged, winding normalized) before it is written. Slicing leaves
   duplicate vertices along the cut seams; trimesh merges those on load so it
   reports the mesh watertight, but Bambu Studio's stricter check does not weld
   and would otherwise see the unmerged seams as open edges and ask you to repair
   the mesh with a third-party tool. Welding makes the painted `.3mf` load as a
-  watertight/manifold single mesh with the band in place, no repair needed.
+  watertight/manifold single mesh with the paint in place, no repair needed.
 
 ### Geometry + paint only — no print profile
 

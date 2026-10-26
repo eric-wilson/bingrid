@@ -114,9 +114,16 @@ def build_parser() -> argparse.ArgumentParser:
     band = parser.add_argument_group("color band")
     band.add_argument(
         "--3mf-paint", dest="three_mf_paint", action="store_true",
-        help="export the single bin as one mesh with a painted horizontal "
-             "color band assigned to filament 2 (Bambu paint_color .3mf); "
-             "independent of the stacking lip",
+        help="export the single bin as one mesh with the stacking LIP painted "
+             "to filament 2 (Bambu paint_color .3mf): a clean two-tone body + "
+             "colored rim, one color change near the top. Requires a stacking "
+             "lip unless --color-band is given",
+    )
+    band.add_argument(
+        "--color-band", dest="color_band", action="store_true",
+        help="with --3mf-paint, paint a mid-wall horizontal color band instead "
+             "of the stacking lip (uses --color-band-start / "
+             "--color-band-height); no lip required",
     )
     band.add_argument(
         "--color-band-start", type=float, default=None,
@@ -163,6 +170,7 @@ def config_from_args(args: argparse.Namespace) -> BinConfig:
         color_band_start=args.color_band_start,
         color_band_height=args.color_band_height,
         color_band_extruder=args.color_band_extruder,
+        paint_mode="band" if args.color_band else "lip",
         profile=GridfinityProfile(
             top_opening=args.profile_top_opening,
             chamfer_top=args.profile_chamfer_top,
@@ -182,6 +190,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.three_mf and not args.stacking_lip:
         print("error: --3mf requires the stacking lip")
+        return 2
+
+    # Lip-mode --3mf-paint paints the stacking lip, so it needs one. Band mode
+    # (--color-band) paints the wall and works without a lip.
+    if args.three_mf_paint and not args.color_band and not args.stacking_lip:
+        print(
+            "error: --3mf-paint paints the stacking lip; use --color-band to "
+            "paint a mid-wall band without a lip"
+        )
         return 2
 
     try:

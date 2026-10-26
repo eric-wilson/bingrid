@@ -399,6 +399,13 @@ class BinConfig:
     color_band_start: float | None = None  # z of band bottom, mm; None = auto
     color_band_height: float = 5.0   # band thickness, mm
     color_band_extruder: int = 2     # filament/extruder painted onto the band
+    # Which region `--3mf-paint` colors. "lip" (the DEFAULT) paints the
+    # stacking lip -- the top rim, the last region printed -- for a clean
+    # two-tone "black body, colored rim" with a single color change near the
+    # top. "band" paints the arbitrary mid-wall horizontal band described by the
+    # `color_band_*` fields above (the explicit opt-in). Both modes assign the
+    # painted faces to `color_band_extruder`.
+    paint_mode: str = "lip"          # "lip" (default) or "band"
     profile: GridfinityProfile = GridfinityProfile()
 
     def __post_init__(self) -> None:
@@ -448,13 +455,18 @@ class BinConfig:
             step = 2 * self.lip_wall + 2 * self.profile.chamfer_top
             if min(self.width, self.length) - step <= 0:
                 raise ValueError("wall too thin for stacking lip")
-        # Only validate the color band when it is actually requested, so the
-        # disabled defaults never reject an otherwise-valid bin.
-        if self.color_band_enabled:
+        if self.paint_mode not in ("lip", "band"):
+            raise ValueError("paint_mode must be 'lip' or 'band'")
+        if self.color_band_extruder < 2:
+            raise ValueError("color band extruder must be >= 2")
+        # Only validate the mid-wall band geometry when it is actually used --
+        # i.e. the painted export is on AND band mode is selected. Lip mode
+        # needs no band geometry (it paints the rim), so a lip-mode export must
+        # never be rejected by band checks. The disabled defaults never reach
+        # here either.
+        if self.color_band_enabled and self.paint_mode == "band":
             if self.color_band_height <= 0:
                 raise ValueError("color band height must be positive")
-            if self.color_band_extruder < 2:
-                raise ValueError("color band extruder must be >= 2")
             lo, hi = self.base_height, self.total_height
             # The band itself must fit within the wall span regardless of where
             # it is placed; auto-positioning can only slide it, not shrink it.
@@ -598,6 +610,18 @@ class BinConfig:
     def color_band_top(self) -> float:
         """Z of the band's top edge (resolved start + band height), mm (part coords)."""
         return self.resolved_color_band_start + self.color_band_height
+
+    @property
+    def lip_paint_bottom(self) -> float:
+        """Z at/above which faces are the stacking lip, mm (part coords).
+
+        The single lip/body seam plane: the body wall spans
+        ``base_height .. total_height`` and the stacking lip spans
+        ``total_height .. overall_height``, so faces with z at or above
+        ``total_height`` are the lip. Lip-mode painting slices the mesh at this
+        one plane and paints every face at or above it.
+        """
+        return self.total_height
 
     @property
     def overall_height(self) -> float:

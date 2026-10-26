@@ -856,7 +856,7 @@ def test_export_3mf_painted_writes_valid_opc_package(gridfinity, tmp_path):
 
 def test_painted_3mf_band_faces_use_paint_color_8(gridfinity, tmp_path):
     cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6,
-                               color_band_enabled=True)
+                               color_band_enabled=True, paint_mode="band")
     exporter = gridfinity.ModelExporter(tmp_path)
     (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
 
@@ -873,7 +873,7 @@ def test_painted_3mf_band_faces_use_paint_color_8(gridfinity, tmp_path):
 
 def test_painted_faces_fall_within_band_and_none_span_boundary(gridfinity, tmp_path):
     cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6,
-                               color_band_enabled=True)
+                               color_band_enabled=True, paint_mode="band")
     exporter = gridfinity.ModelExporter(tmp_path)
     (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
 
@@ -920,7 +920,7 @@ def test_painted_3mf_is_strictly_welded_and_manifold(gridfinity, tmp_path):
     import numpy as np
 
     cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5,
-                               color_band_enabled=True)
+                               color_band_enabled=True, paint_mode="band")
     exporter = gridfinity.ModelExporter(tmp_path)
     (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
 
@@ -957,6 +957,157 @@ def test_painted_3mf_is_strictly_welded_and_manifold(gridfinity, tmp_path):
     assert int((counts_p != 2).sum()) == 0
 
 
+@pytest.mark.parametrize("gx,gy", [(1, 1), (2, 1)])
+def test_painted_3mf_lip_mode_paints_only_the_lip(gridfinity, gx, gy, tmp_path):
+    """DEFAULT --3mf-paint paints the stacking LIP (z >= total_height), not a
+    mid-wall band.
+
+    This is the core of the lip-default change. Every painted face must lie in
+    the lip region ``z >= total_height`` (within tessellation tolerance); every
+    face wholly below the seam must be UNPAINTED; the lip must actually be
+    painted (non-empty); and the body below the seam must be predominantly
+    unpainted. This FAILS on the old mid-band behavior: the old painted faces
+    sat mid-wall with centroids well below ``total_height`` (~17..22 mm for a
+    units=6 bin), so they would all violate the ``z >= total_height`` assertion.
+    """
+    cfg = gridfinity.BinConfig(grid_x=gx, grid_y=gy, height_units=6,
+                               color_band_enabled=True)  # default paint_mode="lip"
+    assert cfg.paint_mode == "lip"
+    exporter = gridfinity.ModelExporter(tmp_path)
+    (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
+
+    verts, tris = _parse_painted_model(path)
+    seam = cfg.total_height
+    eps = 0.05  # tessellation tolerance
+
+    painted = [t for t in tris if t[3] == "8"]
+    assert painted, "lip must be painted (non-empty)"
+
+    body_unpainted = 0
+    for v1, v2, v3, paint in tris:
+        zs = [verts[v1][2], verts[v2][2], verts[v3][2]]
+        if paint == "8":
+            # Every painted face lies at or above the lip/body seam.
+            assert all(z >= seam - eps for z in zs)
+        else:
+            # Every face wholly below the seam must be unpainted (it is, since
+            # we only reach here for unpainted faces). Count them to prove the
+            # body is predominantly unpainted.
+            if all(z < seam - eps for z in zs):
+                body_unpainted += 1
+
+    # Every face strictly below the seam is unpainted (no mid-wall stripe).
+    for v1, v2, v3, paint in tris:
+        zs = [verts[v1][2], verts[v2][2], verts[v3][2]]
+        if all(z < seam - eps for z in zs):
+            assert paint is None, "a face below the lip seam was painted"
+
+    # The body below the seam is the large majority of the mesh and is unpainted.
+    assert body_unpainted > len(painted)
+
+
+def test_painted_3mf_lip_mode_is_strictly_welded_and_manifold(gridfinity, tmp_path):
+    """The lip-painted .3mf is a single welded vertex pool with no open edges.
+
+    Same strict check as the band-mode weld test, on the default lip mode: no
+    duplicate vertex positions and every undirected edge shared by exactly two
+    faces, using the AS-WRITTEN indices (no welding in the test).
+    """
+    import numpy as np
+
+    cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5,
+                               color_band_enabled=True)  # default paint_mode="lip"
+    exporter = gridfinity.ModelExporter(tmp_path)
+    (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
+
+    verts, tris = _parse_painted_model(path)
+    V = np.array(verts, dtype=float)
+    F = np.array([(v1, v2, v3) for (v1, v2, v3, _paint) in tris], dtype=int)
+
+    unique_pos, inverse = np.unique(np.round(V, 5), axis=0, return_inverse=True)
+    duplicate_count = len(V) - len(unique_pos)
+    assert duplicate_count == 0, (
+        f"{duplicate_count} coincident-unwelded duplicate vertices"
+    )
+
+    edges = np.sort(
+        np.vstack([F[:, [0, 1]], F[:, [1, 2]], F[:, [2, 0]]]), axis=1
+    )
+    _uniq_edges, counts = np.unique(edges, axis=0, return_counts=True)
+    assert int((counts != 2).sum()) == 0, "edges not shared by exactly 2 faces"
+
+    Fp = inverse[F]
+    edges_p = np.sort(
+        np.vstack([Fp[:, [0, 1]], Fp[:, [1, 2]], Fp[:, [2, 0]]]), axis=1
+    )
+    _ue, counts_p = np.unique(edges_p, axis=0, return_counts=True)
+    assert int((counts_p != 2).sum()) == 0
+
+
+@pytest.mark.parametrize("gx,gy", [(1, 1), (2, 1), (2, 3)])
+def test_painted_3mf_lip_mode_is_watertight_and_matches_footprint(
+    gridfinity, gx, gy, tmp_path
+):
+    """The lip-painted mesh stays watertight with the footprint unchanged."""
+    import trimesh
+
+    cfg = gridfinity.BinConfig(grid_x=gx, grid_y=gy, height_units=6,
+                               color_band_enabled=True)  # default paint_mode="lip"
+    exporter = gridfinity.ModelExporter(tmp_path)
+    (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
+
+    mesh = trimesh.load(str(path), force="mesh")
+    assert mesh.is_watertight
+    assert mesh.extents[0] == pytest.approx(cfg.width, abs=0.3)
+    assert mesh.extents[1] == pytest.approx(cfg.length, abs=0.3)
+    assert mesh.extents[2] == pytest.approx(cfg.overall_height, abs=0.3)
+
+
+def test_painted_faces_fall_within_explicit_band(gridfinity, tmp_path):
+    """Band opt-in still works: with band mode and an explicit start/height the
+    painted faces land in that z-band."""
+    cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6,
+                               color_band_enabled=True, paint_mode="band",
+                               color_band_start=15.0, color_band_height=6.0)
+    exporter = gridfinity.ModelExporter(tmp_path)
+    (path,) = exporter.export_3mf_painted(gridfinity.GridfinityBin(cfg).build(), cfg)
+
+    verts, tris = _parse_painted_model(path)
+    b0, b1 = cfg.resolved_color_band_start, cfg.color_band_top
+    assert b0 == pytest.approx(15.0)
+    assert b1 == pytest.approx(21.0)
+    eps = 0.05
+    painted = [t for t in tris if t[3] == "8"]
+    assert painted, "band must be painted (non-empty)"
+    for v1, v2, v3, paint in tris:
+        if paint == "8":
+            zs = [verts[v1][2], verts[v2][2], verts[v3][2]]
+            assert all(b0 - eps <= z <= b1 + eps for z in zs)
+
+
+def test_cli_3mf_paint_no_lip_exits_2(bin_mod, tmp_path, capsys):
+    """--3mf-paint (lip mode) with --no-stacking-lip errors with exit 2."""
+    rc = bin_mod.main(
+        ["--3mf-paint", "--no-stacking-lip", "--output-dir", str(tmp_path)]
+    )
+    assert rc == 2
+    assert "error:" in capsys.readouterr().out
+    assert not list(tmp_path.glob("*.3mf"))
+
+
+def test_cli_3mf_paint_band_mode_no_lip_is_ok(gridfinity, bin_mod, tmp_path):
+    """--3mf-paint --color-band paints the wall and needs no lip (exit 0)."""
+    rc = bin_mod.main(
+        ["--3mf-paint", "--color-band", "--no-stacking-lip", "--units", "6",
+         "--output-dir", str(tmp_path)]
+    )
+    assert rc == 0
+    threemfs = sorted(tmp_path.glob("*.3mf"))
+    assert len(threemfs) == 1
+    _verts, tris = _parse_painted_model(threemfs[0])
+    assert any(t[3] == "8" for t in tris)
+
+
 def test_cli_3mf_paint_writes_painted_3mf(gridfinity, bin_mod, tmp_path):
     rc = bin_mod.main(
         ["--x", "2", "--y", "1", "--units", "6", "--3mf-paint",
@@ -971,8 +1122,8 @@ def test_cli_3mf_paint_writes_painted_3mf(gridfinity, bin_mod, tmp_path):
 
 def test_cli_3mf_paint_band_outside_wall_exits_2(bin_mod, tmp_path, capsys):
     rc = bin_mod.main(
-        ["--units", "3", "--3mf-paint", "--color-band-start", "500",
-         "--output-dir", str(tmp_path)]
+        ["--units", "3", "--3mf-paint", "--color-band", "--color-band-start",
+         "500", "--output-dir", str(tmp_path)]
     )
     assert rc == 2
     assert "error:" in capsys.readouterr().out
@@ -981,8 +1132,8 @@ def test_cli_3mf_paint_band_outside_wall_exits_2(bin_mod, tmp_path, capsys):
 
 def test_cli_3mf_paint_height_zero_exits_2(bin_mod, tmp_path, capsys):
     rc = bin_mod.main(
-        ["--units", "6", "--3mf-paint", "--color-band-height", "0",
-         "--output-dir", str(tmp_path)]
+        ["--units", "6", "--3mf-paint", "--color-band", "--color-band-height",
+         "0", "--output-dir", str(tmp_path)]
     )
     assert rc == 2
     assert "error:" in capsys.readouterr().out

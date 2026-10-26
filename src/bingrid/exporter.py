@@ -20,6 +20,12 @@ from .config import BinConfig, GridConfig
 class ModelExporter:
     """Writes a solid to STL and STEP using a config-derived file name."""
 
+    # Lip-mode painted export slices this far ABOVE the lip/body seam so the cut
+    # avoids the pre-existing geometric seam (see export_3mf_painted). 0.02 mm
+    # is well under one print layer, so the unpainted sliver it leaves at the
+    # body-wall top is invisible.
+    SEAM_SLICE_OFFSET = 0.02
+
     def __init__(
         self,
         output_dir: Path,
@@ -176,29 +182,40 @@ class ModelExporter:
     ) -> List[Path]:
         """Export the single bin solid as a Bambu-compatible painted ``.3mf``.
 
-        The whole bin is ONE mesh. A horizontal band of the outer wall
-        (``config.color_band_start .. config.color_band_top`` in part z) is
-        painted to a second filament/extruder via a Bambu per-triangle
-        ``paint_color`` attribute, the way a real Gridfinity bin paints its
-        colored rim. The base object is filament/extruder 1; band faces carry
-        ``paint_color="8"`` (extruder 2). This is the single-mesh alternative to
-        the two-body :meth:`export_3mf`.
+        The whole bin is ONE mesh. One region is painted to a second
+        filament/extruder via a Bambu per-triangle ``paint_color`` attribute,
+        the way a real Gridfinity bin paints its colored rim. The base object is
+        filament/extruder 1; painted faces carry ``paint_color="8"`` (extruder
+        2 by default). This is the single-mesh alternative to the two-body
+        :meth:`export_3mf`.
 
-        Algorithm:
+        Which region is painted depends on ``config.paint_mode``:
+
+        * ``"lip"`` (the DEFAULT): the stacking lip -- every face at or above
+          the single lip/body seam plane ``z = config.total_height`` up to the
+          part top. The lip is the last region printed, so coloring it means one
+          color change near the end and a clean two-tone "black body, colored
+          rim".
+        * ``"band"``: the arbitrary mid-wall horizontal band
+          ``config.resolved_color_band_start .. config.color_band_top`` in part
+          z -- the explicit opt-in, matching the legacy behavior.
+
+        Algorithm (shared by both modes):
 
         1. Tessellate the solid to a trimesh mesh through a temp STL (same
            tolerances as the STL output, so surface quality matches).
-        2. Slice the mesh at the two band z-planes so NO triangle spans a band
+        2. Slice the mesh at the mode's z-plane(s) so NO triangle spans a paint
            boundary: for each plane, split into the pieces below and above and
            concatenate them back. Faces that crossed a plane get subdivided
-           along it; the closed solid is preserved.
-        3. Classify each face by centroid z; faces whose centroid falls inside
-           the band get the simple whole-face paint code. Because slicing
-           removed every straddling triangle, centroid and all-vertex
-           classification agree, so each band face is just ``paint_color="8"``.
+           along it; the closed solid is preserved. Lip mode slices at the one
+           seam plane; band mode slices at the two band planes.
+        3. Weld the coincident seam vertices into one shared pool, then classify
+           each face by centroid z against the mode's ``[lo, hi]`` range. Because
+           slicing removed every straddling triangle, centroid and all-vertex
+           classification agree, so each painted face is just ``paint_color="8"``.
         4. Write the OPC (zip) ``.3mf`` by hand (:meth:`_write_painted_3mf`):
            trimesh's generic 3MF writer emits neither Bambu ``paint_color`` nor
-           ``Metadata/model_settings.config``, so it cannot carry the band.
+           ``Metadata/model_settings.config``, so it cannot carry the paint.
 
         The writer itself uses only stdlib ``zipfile`` / ElementTree-free string
         XML + ``uuid``; trimesh is used only to tessellate and slice.
@@ -220,10 +237,33 @@ class ModelExporter:
             )
             mesh = trimesh.load(str(stl_tmp), force="mesh")
 
-        b0 = config.resolved_color_band_start
-        b1 = config.color_band_top
-        mesh = self._slice_at_z(trimesh, mesh, b0)
-        mesh = self._slice_at_z(trimesh, mesh, b1)
+        # Select the slice plane(s) and the painted z-range [lo, hi] from the
+        # mode. Lip mode: one plane just above the lip/body seam, paint
+        # everything above it up to the part top. Band mode: the two band
+        # planes, paint between them.
+        eps = 1e-6
+        if config.paint_mode == "band":
+            lo = config.resolved_color_band_start
+            hi = config.color_band_top
+            planes = (lo, hi)
+        else:  # "lip"
+            # The lip/body seam is at total_height, but that plane coincides with
+            # the pre-existing geometric seam where the body and lip solids meet;
+            # slicing exactly there collapses onto the seam's near-coincident
+            # tessellation and leaves non-manifold edges that no weld can close.
+            # Slice a hair ABOVE the seam instead (SEAM_SLICE_OFFSET, 0.02 mm --
+            # well under one layer) so the cut lands in clean wall geometry. The
+            # painted region is then the lip from this plane up; the unpainted
+            # 0.02 mm ring at the very top of the body wall is sub-layer and
+            # invisible in print.
+            lo = config.lip_paint_bottom + self.SEAM_SLICE_OFFSET
+            # One-sided: anything at or above the slice is the lip. Use the part
+            # top (plus a margin) as the upper bound so top-rim faces classify in.
+            hi = config.overall_height + 1.0
+            planes = (lo,)
+
+        for z in planes:
+            mesh = self._slice_at_z(trimesh, mesh, z)
 
         # Weld coincident vertices BEFORE classifying/writing. Slicing +
         # concatenate leaves two independent vertex pools, so every seam vertex
@@ -236,21 +276,30 @@ class ModelExporter:
         # winding, so the emitted mesh matches a real single-pool Bambu mesh.
         # Classification MUST run after this, since welding changes the face
         # indices and vertex count.
-        mesh.merge_vertices()
+        #
+        # ``digits_vertex=5`` (1e-5 mm) forces the merge tolerance tighter than
+        # trimesh's scale-derived default, which otherwise leaves some coincident
+        # seam vertices unmerged (they re-index into open edges on reload). 1e-5
+        # mm is far inside the 0.05 mm tessellation tolerance, so genuinely
+        # distinct vertices are never falsely merged. process(validate=True)
+        # normalizes winding and drops degenerate faces but re-merges at its own
+        # looser default tolerance, so a second tight merge AFTER it restores the
+        # single welded pool before the mesh is written.
+        mesh.merge_vertices(digits_vertex=5)
         mesh.process(validate=True)
+        mesh.merge_vertices(digits_vertex=5)
 
-        # Classify by face-centroid z. After the two slices no triangle spans a
+        # Classify by face-centroid z. After slicing no triangle spans a paint
         # boundary, so centroid classification matches the all-vertex test.
-        eps = 1e-6
         centroid_z = np.asarray(mesh.triangles_center)[:, 2]
-        in_band = (centroid_z >= b0 - eps) & (centroid_z <= b1 + eps)
+        in_band = (centroid_z >= lo - eps) & (centroid_z <= hi + eps)
 
         # Post-slice consistency guard: every face lies wholly on one side of
         # each plane (all three vertices classify the same as the centroid).
         tri_z = np.asarray(mesh.triangles)[:, :, 2]
-        vert_in = (tri_z >= b0 - eps) & (tri_z <= b1 + eps)
+        vert_in = (tri_z >= lo - eps) & (tri_z <= hi + eps)
         assert np.array_equal(vert_in.all(axis=1), in_band), (
-            "slice left a triangle straddling a band boundary"
+            "slice left a triangle straddling a paint boundary"
         )
 
         # Bambu whole-face paint code: filament/extruder N -> (N << 2) in hex.

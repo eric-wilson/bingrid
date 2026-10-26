@@ -104,10 +104,15 @@ def test_cavity_bottom_sits_a_floor_above_the_feet(config_mod):
         ({"foot_clearance": 20.0}, "foot collapses"),
         # lip rim wall so thick the perimeter seat opening collapses (<=0)
         ({"lip_wall": 20.0}, "wall too thin for stacking lip"),
-        # color band validation (only enforced when the band is enabled)
-        ({"color_band_enabled": True, "color_band_height": 0}, "color band height"),
+        # color band geometry validation (only enforced in band mode)
+        ({"color_band_enabled": True, "paint_mode": "band",
+          "color_band_height": 0}, "color band height"),
+        ({"color_band_enabled": True, "paint_mode": "band",
+          "color_band_start": 9000.0}, "outside the bin wall"),
+        # extruder is validated in both paint modes
         ({"color_band_enabled": True, "color_band_extruder": 1}, "color band extruder"),
-        ({"color_band_enabled": True, "color_band_start": 9000.0}, "outside the bin wall"),
+        # paint_mode must be a known value
+        ({"paint_mode": "nope"}, "paint_mode must be"),
     ],
 )
 def test_bin_config_rejects_bad_values(config_mod, kwargs, msg):
@@ -123,6 +128,7 @@ def test_color_band_defaults(config_mod):
     assert cfg.color_band_start is None            # None = auto-position
     assert cfg.color_band_height == pytest.approx(5.0)
     assert cfg.color_band_extruder == 2
+    assert cfg.paint_mode == "lip"           # paint the lip by default
 
 
 def test_color_band_auto_centers_in_wall(config_mod):
@@ -149,7 +155,7 @@ def test_color_band_taller_than_wall_rejected(config_mod):
     # A band thicker than the whole wall can't fit no matter where it sits.
     with pytest.raises(ValueError, match="taller than the bin wall"):
         config_mod.BinConfig(height_units=1, color_band_enabled=True,
-                             color_band_height=100.0)
+                             paint_mode="band", color_band_height=100.0)
 
 
 # --- shared profile guards -------------------------------------------------
