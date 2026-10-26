@@ -89,9 +89,15 @@ than the body. On a multi-color setup (AMS) it prints as one seamless object in
 two colors. If the lip ever looks offset, use **Assemble** to snap both back to
 their original coordinates.
 
-A `.3mf` multi-body export (one file, both bodies pre-separated and
-color-assignable, no manual combine step) is tracked separately — see
+For the single-file alternative, `--3mf` writes one `.3mf` holding both bodies
+pre-separated and color-assignable (no manual combine step) — see
 [two-color-3mf-export.md](two-color-3mf-export.md).
+
+```bash
+# from src/
+python -m bingrid.bin --x 2 --y 1 --units 5 --stacking-lip --3mf
+# writes one .3mf with two named bodies ("body" + "lip"), pre-aligned
+```
 
 ## Tests
 

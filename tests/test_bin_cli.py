@@ -8,6 +8,7 @@ def test_defaults(bin_mod):
     assert args.units == 3
     assert args.stacking_lip is True
     assert args.split_lip is False
+    assert args.three_mf is False
 
 
 def test_no_stacking_lip_clears_the_lip(bin_mod):
@@ -26,6 +27,26 @@ def test_grid_and_units_feed_config(bin_mod):
 def test_split_lip_sets_flag(bin_mod):
     args = bin_mod.build_parser().parse_args(["--split-lip"])
     assert args.split_lip is True
+
+
+def test_3mf_sets_flag(bin_mod):
+    args = bin_mod.build_parser().parse_args(["--3mf"])
+    assert args.three_mf is True
+
+
+def test_3mf_defaults_off(bin_mod):
+    args = bin_mod.build_parser().parse_args([])
+    assert args.three_mf is False
+
+
+def test_3mf_without_lip_returns_2_and_writes_nothing(bin_mod, tmp_path, capsys):
+    rc = bin_mod.main(
+        ["--3mf", "--no-stacking-lip", "--output-dir", str(tmp_path)]
+    )
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "error:" in out
+    assert not list(tmp_path.glob("*.3mf"))
 
 
 def test_split_lip_without_lip_returns_2_and_writes_nothing(bin_mod, tmp_path, capsys):

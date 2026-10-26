@@ -334,6 +334,103 @@ def test_split_lip_exports_two_watertight_meshes(gridfinity, tmp_path):
     assert xlo == pytest.approx(min(body_insp.bounds[0][0], lip_insp.bounds[0][0]), abs=0.1)
 
 
+# --- --3mf exports one file with two pre-aligned named bodies --------------
+
+def _require_3mf_writer():
+    """Skip cleanly if trimesh's 3MF writer (needs lxml) is unavailable.
+
+    The happy path MUST run here (lxml is in requirements and installed); the
+    guard only turns a cryptic writer failure into a clear skip on a bare env.
+    """
+    try:
+        import lxml  # noqa: F401
+    except Exception:  # pragma: no cover - lxml is a declared dependency
+        pytest.skip("lxml unavailable; trimesh 3MF writer cannot run")
+
+
+def test_export_3mf_writes_one_nonempty_file(gridfinity, tmp_path):
+    _require_3mf_writer()
+    cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=5)
+    bin_ = gridfinity.GridfinityBin(cfg)
+    body, lip = bin_.build_split()
+    exporter = gridfinity.ModelExporter(tmp_path)
+    paths = exporter.export_3mf(body, lip, cfg)
+
+    threemfs = sorted(tmp_path.glob("*.3mf"))
+    assert len(threemfs) == 1
+    assert paths == threemfs
+    assert threemfs[0].name == f"{exporter.bin_default_name(cfg)}.3mf"
+    assert threemfs[0].stat().st_size > 0
+    # The temp STLs used for tessellation must be cleaned up (no strays).
+    assert not list(tmp_path.glob("*.stl"))
+
+
+def test_export_3mf_has_two_aligned_watertight_bodies(gridfinity, tmp_path):
+    _require_3mf_writer()
+    import trimesh
+
+    cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=5)
+    bin_ = gridfinity.GridfinityBin(cfg)
+    body, lip = bin_.build_split()
+    exporter = gridfinity.ModelExporter(tmp_path)
+    (out_path,) = exporter.export_3mf(body, lip, cfg)
+
+    scene = trimesh.load(str(out_path))
+    assert isinstance(scene, trimesh.Scene)
+    # Two separate, individually named bodies.
+    assert len(scene.geometry) == 2
+    assert set(scene.geometry.keys()) == {"body", "lip"}
+
+    body_mesh = scene.geometry["body"]
+    lip_mesh = scene.geometry["lip"]
+    assert body_mesh.is_watertight and lip_mesh.is_watertight
+
+    # Relative z-alignment preserved: the lip sits above the body (its base is
+    # at the body's top, ~total_height), not re-centered to the bed.
+    body_zmin, body_zmax = body_mesh.bounds[0][2], body_mesh.bounds[1][2]
+    lip_zmin, lip_zmax = lip_mesh.bounds[0][2], lip_mesh.bounds[1][2]
+    assert body_zmin == pytest.approx(0.0, abs=0.1)
+    assert body_zmax == pytest.approx(cfg.total_height, abs=0.1)
+    assert lip_zmin == pytest.approx(cfg.total_height, abs=0.1)
+    assert lip_zmax == pytest.approx(cfg.overall_height, abs=0.1)
+
+    # Same XY footprint / origin: both centered on the bin origin, lip no wider
+    # than the body, so they load exactly as build_split produced them.
+    for mesh in (body_mesh, lip_mesh):
+        cx = (mesh.bounds[0][0] + mesh.bounds[1][0]) / 2
+        cy = (mesh.bounds[0][1] + mesh.bounds[1][1]) / 2
+        assert cx == pytest.approx(0.0, abs=0.1)
+        assert cy == pytest.approx(0.0, abs=0.1)
+    assert body_mesh.extents[0] == pytest.approx(cfg.width, abs=0.2)
+    assert body_mesh.extents[1] == pytest.approx(cfg.length, abs=0.2)
+    assert lip_mesh.extents[0] == pytest.approx(cfg.width, abs=0.2)
+    assert lip_mesh.extents[1] == pytest.approx(cfg.length, abs=0.2)
+
+
+def test_cli_3mf_with_lip_writes_a_3mf(gridfinity, bin_mod, tmp_path):
+    _require_3mf_writer()
+    import trimesh
+
+    rc = bin_mod.main(
+        ["--x", "2", "--y", "1", "--units", "5", "--stacking-lip", "--3mf",
+         "--output-dir", str(tmp_path)]
+    )
+    assert rc == 0
+    threemfs = sorted(tmp_path.glob("*.3mf"))
+    assert len(threemfs) == 1
+    scene = trimesh.load(str(threemfs[0]))
+    assert set(scene.geometry.keys()) == {"body", "lip"}
+
+
+def test_cli_3mf_without_lip_exits_2(bin_mod, tmp_path, capsys):
+    rc = bin_mod.main(
+        ["--3mf", "--no-stacking-lip", "--output-dir", str(tmp_path)]
+    )
+    assert rc == 2
+    assert "error:" in capsys.readouterr().out
+    assert not list(tmp_path.glob("*.3mf"))
+
+
 def test_single_build_writes_one_stl(gridfinity, tmp_path):
     cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=5)
     exporter = gridfinity.ModelExporter(tmp_path)

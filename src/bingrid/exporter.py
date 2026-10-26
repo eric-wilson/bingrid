@@ -5,6 +5,7 @@ convention lives in exactly one place (DRY / Single Responsibility).
 """
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from typing import List
 
@@ -113,3 +114,53 @@ class ModelExporter:
         )
         cq.exporters.export(body.union(lip), str(step_path))
         return [body_path, lip_path, step_path]
+
+    def export_3mf(
+        self,
+        body: cq.Workplane,
+        lip: cq.Workplane,
+        config: BinConfig,
+        name: str | None = None,
+    ) -> List[Path]:
+        """Export the bin body and lip as TWO named bodies in ONE ``.3mf``.
+
+        Writes a single ``{base}.3mf`` 3D Manufacturing Format package holding
+        two separate, pre-aligned bodies named ``body`` and ``lip``. Opened in a
+        slicer (Bambu Studio / OrcaSlicer) the parts arrive already separated and
+        aligned, ready for per-body filament assignment — the single-file
+        alternative to the dual-STL :meth:`export_split`.
+
+        CadQuery 2.8 cannot emit ``.3mf`` itself, so each solid is tessellated to
+        a mesh via trimesh (reusing the exporter's STL tolerance so surface
+        quality matches the STL output) and the two named meshes are written with
+        trimesh's 3MF writer. Both bodies share the bin origin, so they load
+        pre-aligned (the lip sits exactly on top of the body).
+
+        trimesh's 3MF writer needs ``lxml`` (declared in ``requirements.txt``);
+        importing trimesh here keeps the heavy dependency out of the import path
+        of the STL/STEP exporters.
+        """
+        import trimesh
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        base = name or self.bin_default_name(config)
+        out_path = self.output_dir / f"{base}.3mf"
+
+        # Tessellate each solid through a temp STL (same tolerances as the STL
+        # output) and load it as a trimesh mesh, then clean the temp files up.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            scene = trimesh.Scene()
+            for geom_name, solid in (("body", body), ("lip", lip)):
+                stl_tmp = tmp_dir / f"{geom_name}.stl"
+                cq.exporters.export(
+                    solid,
+                    str(stl_tmp),
+                    tolerance=self.stl_tolerance,
+                    angularTolerance=self.stl_angular_tolerance,
+                )
+                mesh = trimesh.load(str(stl_tmp), force="mesh")
+                scene.add_geometry(mesh, geom_name=geom_name)
+            scene.export(str(out_path))
+
+        return [out_path]

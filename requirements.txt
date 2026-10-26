@@ -8,3 +8,5 @@ shapely
 networkx
 rtree
 mapbox_earcut
+# Needed by trimesh's 3MF writer (used by the bin --3mf two-body export).
+lxml

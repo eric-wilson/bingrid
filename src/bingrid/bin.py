@@ -8,6 +8,7 @@ output paths, keeping the config and geometry layers reusable.
 Run:
     python -m bingrid.bin --x 2 --y 1 --units 6 --stacking-lip
     python -m bingrid.bin --x 2 --y 1 --units 6 --split-lip
+    python -m bingrid.bin --x 2 --y 1 --units 6 --3mf
 """
 from __future__ import annotations
 
@@ -99,6 +100,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--split-lip", action="store_true",
         help="export the body and lip as separate STL meshes",
     )
+    lip.add_argument(
+        "--3mf", dest="three_mf", action="store_true",
+        help="export the body and lip as two named bodies in one .3mf file "
+             "(single-file two-color alternative to --split-lip)",
+    )
     parser.set_defaults(stacking_lip=True)
 
     out = parser.add_argument_group("output")
@@ -144,6 +150,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: --split-lip requires the stacking lip")
         return 2
 
+    if args.three_mf and not args.stacking_lip:
+        print("error: --3mf requires the stacking lip")
+        return 2
+
     try:
         config = config_from_args(args)
     except ValueError as exc:
@@ -154,9 +164,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     exporter = ModelExporter(args.output_dir)
 
     name = args.name or exporter.bin_default_name(config)
-    if args.split_lip:
+    # --split-lip and --3mf both need the body/lip split; they may be requested
+    # together (write both the two STLs AND the .3mf) or independently. When
+    # neither is set, write the single combined STL/STEP.
+    if args.split_lip or args.three_mf:
         body, lip = bin_.build_split()
-        paths = exporter.export_split(body, lip, config, name=name)
+        paths = []
+        if args.split_lip:
+            paths += exporter.export_split(body, lip, config, name=name)
+        if args.three_mf:
+            paths += exporter.export_3mf(body, lip, config, name=name)
     else:
         model = bin_.build()
         paths = exporter.export(model, config, name=name)
