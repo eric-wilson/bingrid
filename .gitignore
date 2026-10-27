@@ -148,3 +148,6 @@ samples/
 
 # Workflow/agent task artifacts (designs, plans, reviews) — local only
 .agents/
+
+# Session handoff notes — local only
+HANDOFF-*.md
