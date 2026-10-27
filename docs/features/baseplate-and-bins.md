@@ -51,9 +51,9 @@ Generator: `GridfinityPlate` (`geometry.py`), CLI `python -m bingrid.cli`.
   **sizes/heights are unchanged**, so the flat opening span a bin foot seats
   against is identical and bins still interlock with plates (foot, lip, and
   socket stay one consistent rounded family). `corner_radius = 0` opts back out
-  to a sharp (square) socket opening. Rounding the interior removes a little less
-  material, so the plate volume rises slightly; the plate footprint and height
-  (bounding box) are unchanged.
+  to a sharp (square) socket opening. Rounding the interior removes a little more
+  material, so the plate volume drops slightly (1531.345 -> 1471.168); the plate
+  footprint and height (bounding box) are unchanged (42 x 42 x 5.0).
 
 ## Bins
 

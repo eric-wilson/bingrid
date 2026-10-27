@@ -24,8 +24,9 @@ pytestmark = pytest.mark.integration
 # Plate-socket baseline for GridConfig(grid_x=1, grid_y=1, height=5.0, magnet
 # disabled). RE-CAPTURED for the rounded socket interior: the socket's inner
 # opening corners are now rounded CONCENTRIC with the reference outer corner
-# (3.75) instead of squared off, so the socket cuts a little LESS material and
-# the plate volume rises slightly (1531.345 -> 1471.168). This is intentional
+# (3.75) instead of squared off, so the rounded/ruled socket cut removes a
+# little MORE material and the plate volume drops slightly (1531.345 ->
+# 1471.168). This is intentional
 # and the ONLY reason the baseline moved -- socket opening sizes/heights are
 # unchanged (bins still interlock), and the BBOX is unchanged (42 x 42 x 5.0):
 # rounding the interior opening only removes the sharp inner corner, never
