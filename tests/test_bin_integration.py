@@ -22,13 +22,17 @@ pytestmark = pytest.mark.integration
 
 
 # Plate-socket baseline for GridConfig(grid_x=1, grid_y=1, height=5.0, magnet
-# disabled), re-measured to the corrected carbon-copy reference profile (top
-# 37.7, chamfer_top 2.1, chamfer_bottom 0.80, bottom_inset 0.75). The socket
-# INTENTIONALLY moved -- the plate socket shares GridfinityProfile with the bin
-# foot/lip, so correcting the profile corrects the socket in lockstep. rel=1e-9
-# still fails on any UNINTENDED shift. BBOX z stays 5.0 (explicit plate height).
-BASELINE_VOLUME = 1531.3452718749968
-BASELINE_BBOX = (42.0000002, 42.0000002, 5.000000200000001)  # xlen, ylen, zlen
+# disabled). RE-CAPTURED for the rounded socket interior: the socket's inner
+# opening corners are now rounded CONCENTRIC with the reference outer corner
+# (3.75) instead of squared off, so the socket cuts a little LESS material and
+# the plate volume rises slightly (1531.345 -> 1471.168). This is intentional
+# and the ONLY reason the baseline moved -- socket opening sizes/heights are
+# unchanged (bins still interlock), and the BBOX is unchanged (42 x 42 x 5.0):
+# rounding the interior opening only removes the sharp inner corner, never
+# touches the plate footprint or height. rel=1e-9 still fails on any OTHER,
+# unintended shift.
+BASELINE_VOLUME = 1471.1676574663347
+BASELINE_BBOX = (42.0, 42.0, 5.0000001)  # xlen, ylen, zlen
 
 
 def _require_slice(insp, z):
@@ -1319,3 +1323,165 @@ def test_lip_seat_inner_corner_radius_is_measured_and_concentric(gridfinity, tmp
     body_cc_y = cfg.length / 2 - cfg.corner_radius
     assert abs(xc) == pytest.approx(body_cc_x, abs=0.6)
     assert abs(yc) == pytest.approx(body_cc_y, abs=0.6)
+
+
+# =========================================================================
+# Baseplate socket interior opening — rounded concentric with the outer
+# =========================================================================
+#
+# The baseplate socket cavity's INNER opening corners are rounded concentric
+# with the reference outer corner (profile.corner_radius = 3.75), growing from
+# the narrow bottom up toward the wide mouth -- the real Gridfinity socket
+# curves on its inner corners all the way up, instead of a squared-off opening.
+# These targets are hardcoded numeric constants derived from the single
+# corner_radius via GridfinityProfile.opening_corner_radius; no sample file is
+# read or named. Every test below FAILS on the pre-change squared-off socket
+# (the socket was lofted from sharp .rect() squares, so the interior ring held
+# ~4-9 points and fit no corner arc).
+
+# Single-cell socket center sits at the cell center = origin for a 1x1 plate, so
+# the socket's opening corners lie about the plate origin. The socket profile
+# bottom for a height=5.0 plate is z = 5.0 - profile.total_height = 0.35.
+# z-levels used: just inside the bottom chamfer, the straight seat run, and near
+# the mouth. Expected concentric radii (opening_corner_radius): bottom ~0.9,
+# straight ~1.65, growing to ~3.75 at the mouth face.
+
+
+def _plate_1x1(gridfinity, height=5.0):
+    return gridfinity.GridConfig(
+        grid_x=1, grid_y=1, height=height,
+        magnet=gridfinity.MagnetConfig(enabled=False),
+    )
+
+
+def test_socket_interior_opening_corners_are_rounded_and_grow(gridfinity, tmp_path):
+    """The baseplate socket's interior opening corners are ROUNDED and grow up.
+
+    This FAILS on the pre-change squared-off socket: it was lofted from sharp
+    ``.rect()`` squares, so the interior ring's +x+y corner held essentially no
+    arc points and ``_fit_corner_arc`` returned None (no fitted radius), and the
+    ring carried only ~4-9 points. After the change each socket slice's inner
+    opening fits a POSITIVE corner radius, the ring carries many points, the
+    radius GROWS from the narrow bottom toward the wide mouth (concentric with
+    the outer), and every fitted arc center sits on the SAME vertical line
+    (concentric with the reference outer corner).
+    """
+    cfg = _plate_1x1(gridfinity)
+    p = cfg.profile
+    assert p.corner_radius > 0
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityPlate(cfg).build(), tmp_path)
+
+    z_bot = cfg.resolved_height - p.total_height  # socket profile bottom (0.35)
+    z_low = z_bot + 0.45    # inside the lower chamfer, near the narrow bottom
+    z_mid = z_bot + 1.5     # the straight seat run
+    z_high = z_bot + 4.1    # up in the mouth flare, near the wide mouth
+
+    rings = [_section_interior_xy(insp, z) for z in (z_low, z_mid, z_high)]
+    if any(r is None for r in rings):
+        pytest.skip("trimesh 2D section extras unavailable")
+    low, mid, high = rings
+
+    # Many ring points at each level: a rounded opening adds an arc; a sharp
+    # square opening has ~4 (this is the assertion that catches the old socket).
+    for xs, _ys in (low, mid, high):
+        assert len(xs) > 20, "socket interior opening corner is sharp, not rounded"
+
+    fits = [_fit_corner_arc(xs, ys) for (xs, ys) in (low, mid, high)]
+    for f in fits:
+        assert f is not None, "socket interior opening corner is sharp, not rounded"
+    (xl, yl, r_low), (xm, ym, r_mid), (xh, yh, r_high) = fits
+
+    # Rounded: positive radii, all under the reference outer 3.75.
+    for r in (r_low, r_mid, r_high):
+        assert 0.3 < r < p.corner_radius
+
+    # GROWS from the narrow bottom toward the wide mouth (concentric with the
+    # outer), matching the measured growth direction (bottom small -> mouth near
+    # 3.75). Each step up is clearly wider.
+    assert r_mid > r_low + 0.2
+    assert r_high > r_mid + 0.4
+
+    # Rough magnitude per the concentric model (opening_corner_radius): low
+    # ~0.9, straight ~1.65, high approaching 3.75. Generous tolerance -- the
+    # growth + concentricity are the contract, not an exact dimension.
+    assert r_low == pytest.approx(1.0, abs=0.6)
+    assert r_mid == pytest.approx(1.65, abs=0.6)
+    assert r_high == pytest.approx(3.2, abs=0.8)
+
+    # Concentric: every fitted arc center sits at the mouth's corner center
+    # ``mouth_opening/2 - corner_radius`` from the socket (origin) center.
+    cc = p.mouth_opening / 2 - p.corner_radius
+    for xc, yc in ((xl, yl), (xm, ym), (xh, yh)):
+        assert abs(xc) == pytest.approx(cc, abs=0.6)
+        assert abs(yc) == pytest.approx(cc, abs=0.6)
+
+
+def test_socket_interior_corner_radius_matches_concentric_model(gridfinity):
+    """``opening_corner_radius`` is the concentric model derived from 3.75.
+
+    Pure-arithmetic guard (no render): the per-plane socket opening radius is
+    ``corner_radius - (mouth_opening - opening)/2`` (the outer radius minus the
+    per-side inset below the mouth), clamped to ``[0, opening/2]``. It is 3.75 at
+    the mouth and shrinks for narrower planes, so the socket interior curve grows
+    up toward the mouth. Derived from the single ``corner_radius`` -- no magic
+    numbers.
+    """
+    p = gridfinity.GridfinityProfile()
+    assert p.corner_radius == pytest.approx(3.75)
+    # Mouth plane: full outer radius.
+    assert p.opening_corner_radius(p.mouth_opening) == pytest.approx(3.75)
+    # Straight seat opening (37.7): 3.75 - (41.9 - 37.7)/2 = 1.65.
+    assert p.opening_corner_radius(p.top_opening) == pytest.approx(1.65, abs=1e-6)
+    # Narrow bottom (36.2): 3.75 - (41.9 - 36.2)/2 = 0.90.
+    assert p.opening_corner_radius(p.bottom_opening) == pytest.approx(0.90, abs=1e-6)
+    # Monotonic growth toward the mouth.
+    radii = [p.opening_corner_radius(pl.size) for pl in p.profile_planes()]
+    assert radii == sorted(radii)
+    # A sharp socket opts out (corner_radius = 0 -> every radius 0).
+    sharp = gridfinity.GridfinityProfile(corner_radius=0.0)
+    assert all(
+        sharp.opening_corner_radius(pl.size) == 0.0 for pl in sharp.profile_planes()
+    )
+
+
+# Pinned socket opening WIDTHS (edge-to-edge median hole extent, mm) for the
+# default 1x1 height=5.0 plate. Rounding the interior opening corners must NOT
+# resize the socket -- these are the SAME widths the pre-change squared socket
+# cut (the flat edge spans are untouched; only the sharp inner corners became
+# arcs), so a bin foot still plugs in and bins still interlock with plates.
+SOCKET_OPENING_WIDTHS = {
+    # z measured in PART coords (socket profile bottom = 0.35 for height 5.0):
+    0.80: 37.044,   # inside the lower chamfer
+    1.50: 37.700,   # straight seat run
+    2.50: 37.700,   # straight seat run
+    4.90: 41.700,   # near the wide mouth
+}
+
+
+def test_socket_opening_widths_unchanged(gridfinity, tmp_path):
+    """Socket opening WIDTHS at each z are UNCHANGED by the interior rounding.
+
+    Pins the socket opening sizes so the interior-curve change can never
+    accidentally resize the socket: the flat opening span (what a bin foot seats
+    against) stays what it was, only the sharp inner corners became rounded. If
+    this drifts, the bin-plate interlock is at risk.
+    """
+    cfg = _plate_1x1(gridfinity)
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityPlate(cfg).build(), tmp_path)
+    for z, expected in SOCKET_OPENING_WIDTHS.items():
+        prof = insp.slice_at(z)
+        if prof is None:
+            pytest.skip("trimesh 2D section extras unavailable")
+        assert prof.hole_count == 1
+        open_w = statistics.median(w for (w, _d) in prof.hole_extents)
+        assert open_w == pytest.approx(expected, abs=0.2)
+
+
+@pytest.mark.parametrize("gx,gy", [(1, 1), (2, 2), (3, 3)])
+def test_rounded_socket_plate_is_watertight(gridfinity, gx, gy):
+    """1x1 / 2x2 / 3x3 plates with the rounded socket stay watertight/valid."""
+    cfg = gridfinity.GridConfig(
+        grid_x=gx, grid_y=gy, height=5.0,
+        magnet=gridfinity.MagnetConfig(enabled=False),
+    )
+    assert gridfinity.GridfinityPlate(cfg).build().val().isValid()

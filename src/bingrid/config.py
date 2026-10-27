@@ -135,6 +135,13 @@ class GridfinityProfile:
     straight: float = 1.75       # Vertical section height, mm
     chamfer_bottom: float = 0.80  # Bottom chamfer height, mm
     bottom_inset: float = 0.75   # Per-side inward step over the bottom chamfer, mm
+    # Reference outer vertical corner radius the socket opening is rounded
+    # CONCENTRIC with, mm; 0 = sharp (square) socket opening. Matches the real
+    # Gridfinity 3.75 mm outer corner (the same radius the bin body/foot/lip use)
+    # so the plate socket, the bin foot, and the bin lip stay a consistent
+    # rounded family. Only affects the interior opening CURVE -- socket opening
+    # sizes/heights are untouched.
+    corner_radius: float = 3.75
 
     def __post_init__(self) -> None:
         for name in ("top_opening", "chamfer_top", "straight", "chamfer_bottom"):
@@ -144,6 +151,8 @@ class GridfinityProfile:
             raise ValueError("profile bottom_inset cannot be negative")
         if self.bottom_opening <= 0:
             raise ValueError("profile bottom_inset too large; bottom opening <= 0")
+        if self.corner_radius < 0:
+            raise ValueError("profile corner_radius cannot be negative")
 
     @property
     def total_height(self) -> float:
@@ -197,6 +206,36 @@ class GridfinityProfile:
         return tuple(
             Plane(p.z, p.size - 2 * clearance) for p in self.profile_planes()
         )
+
+    def opening_corner_radius(self, opening: float) -> float:
+        """Corner radius for a socket cross-section of width ``opening``, mm.
+
+        The socket interior opening's corners are rounded CONCENTRIC with the
+        reference outer corner (the single ``corner_radius`` -- DRY, the same
+        concentric-corner thinking as :meth:`BinConfig.foot_corner_radius`).
+
+        The widest socket plane is the mouth (``mouth_opening``); there the
+        opening corner should approach the outer ``corner_radius``, so the
+        mouth's corner-arc center sits at ``mouth_opening/2 - corner_radius``
+        from the socket center. Rounding every narrower plane about that SAME
+        center means::
+
+            opening/2 - r == mouth_opening/2 - corner_radius
+
+        so ``r = corner_radius - (mouth_opening - opening)/2`` -- i.e. the outer
+        radius minus the opening's per-side horizontal inset below the mouth.
+        The radius therefore GROWS up the socket: smallest at the narrow bottom,
+        approaching ``corner_radius`` at the wide mouth, with every plane's arc
+        center on one vertical line (concentric with the outer corner). Clamped
+        to ``[0, opening/2]``: a sharp corner where the inset would drive it
+        negative, never larger than half the opening. ``corner_radius <= 0``
+        yields a sharp (square) socket opening.
+        """
+        if self.corner_radius <= 0:
+            return 0.0
+        inset = (self.mouth_opening - opening) / 2.0
+        r = self.corner_radius - inset
+        return max(0.0, min(r, opening / 2.0))
 
 
 @dataclass(frozen=True)

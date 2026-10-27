@@ -38,6 +38,22 @@ Generator: `GridfinityPlate` (`geometry.py`), CLI `python -m bingrid.cli`.
 - Dovetail **connectors** for tiling.
 - **Magnet pockets**: teardrop horizontal by default (holes print round);
   optional vertical bottom-mount.
+- **Rounded socket interior opening:** the socket cavity's **inner** opening
+  corners are rounded **concentric with the reference outer corner** (the same
+  3.75 mm family the bin body/foot/lip use), not left squared off — matching the
+  Gridfinity reference, whose open base curves on its inner corners all the way
+  up. The per-plane radius **GROWS up the socket** (concentric with the outer):
+  it is `corner_radius - (mouth_opening - opening)/2` (the outer radius minus
+  that plane's per-side inset below the mouth, clamped ≥ 0), so it is **~0.9 mm
+  at the narrow bottom → ~1.65 mm through the straight seat → ~3.75 mm at the
+  wide mouth** — derived from the single `GridfinityProfile.corner_radius` (no
+  magic numbers). This **only curves the interior**; the socket opening
+  **sizes/heights are unchanged**, so the flat opening span a bin foot seats
+  against is identical and bins still interlock with plates (foot, lip, and
+  socket stay one consistent rounded family). `corner_radius = 0` opts back out
+  to a sharp (square) socket opening. Rounding the interior removes a little less
+  material, so the plate volume rises slightly; the plate footprint and height
+  (bounding box) are unchanged.
 
 ## Bins
 

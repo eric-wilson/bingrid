@@ -244,11 +244,33 @@ class CellOpeningFeature(PlateFeature):
         z_prof_bot = height - p.total_height  # bottom of lower chamfer
 
         # Lofted socket from the shared profile: bottom (narrow) -> vertical
-        # (top_opening) -> mouth (wide) at the top face. Using the shared
-        # ``_loft_profile`` helper keeps the socket, foot, and lip in lockstep.
-        socket = _loft_profile(
-            p.profile_planes(), base_z=z_prof_bot, center=(cx, cy)
-        )
+        # (top_opening) -> mouth (wide) at the top face. The interior opening
+        # corners are rounded CONCENTRIC with the reference outer corner (a real
+        # Gridfinity socket cavity curves on its inner corners all the way up,
+        # not a sharp square) -- exactly the concentric model the bin foot/lip
+        # already use, so the socket, foot, and lip stay a consistent rounded
+        # family. ``profile.opening_corner_radius`` maps each plane's square
+        # opening to its concentric radius (growing up toward the mouth);
+        # ``_loft_rounded_foot`` lofts the rounded-rect wires exactly like the
+        # foot. Only the opening CURVE changes -- the plane sizes/heights (hence
+        # the socket opening widths a bin foot seats against) are untouched.
+        # ``corner_radius <= 0`` falls back to the sharp shared ``_loft_profile``
+        # so the socket, foot, and lip stay in lockstep in the square case.
+        planes = p.profile_planes()
+        if p.corner_radius > 0:
+            socket_solid = _loft_rounded_foot(
+                planes, p.opening_corner_radius, center=(cx, cy)
+            )
+            socket = cq.Workplane("XY").newObject([socket_solid])
+            # ``_loft_rounded_foot`` lofts wires at their own z; shift the stack
+            # up to the socket profile bottom (``_loft_profile`` folds this into
+            # ``base_z``). The planes start at z=0, so a single translate aligns
+            # the rounded socket with the sharp-socket position exactly.
+            socket = socket.translate((0, 0, z_prof_bot))
+        else:
+            socket = _loft_profile(
+                planes, base_z=z_prof_bot, center=(cx, cy)
+            )
 
         # Straight shaft from the floor top up to the bottom of the socket, at
         # the socket's narrowest size, so the whole opening is continuous.
