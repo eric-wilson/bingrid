@@ -773,13 +773,13 @@ class StackingLipFeature(BinFeature):
     the bin is genuinely open-top across its whole footprint, not capped by a
     solid deck with one small hole.
 
-    The rim steps inward from the outer wall to form a seating ledge, exactly
-    the socket cross-section seen around the perimeter: narrow seat at the
-    bottom, a straight vertical section, then a flared mouth at the top face.
-    Because the seat is reached by stepping in ``chamfer_top`` from the wider
-    mouth, a stacked bin's base seats on the ledge the same way a foot seats in
-    a plate socket. The vertical seating run (``straight`` + ``chamfer_top``)
-    comes straight from the shared :class:`GridfinityProfile`, keeping the
+    The rim steps inward from the body interior to form a seating ledge, the
+    measured lip cross-section seen around the perimeter: a self-supporting
+    lead-in down from the interior, a straight vertical seat run at the measured
+    seat opening (``lip_seat_opening`` = 37.70), then a flared mouth at the top
+    face. Because the seat opening is ``foot_straight_opening + 2*lip_clearance``
+    -- the SAME 37.70 as the baseplate socket seat -- a stacked bin's foot seats
+    on the ledge exactly the way it seats in a plate socket, keeping the
     baseplate socket, the bin foot, and the bin lip in lockstep (DRY).
 
     Self-skips when the config disables the lip. Runs last so it attaches to the
@@ -798,7 +798,6 @@ class StackingLipFeature(BinFeature):
         Built in world coordinates so :meth:`GridfinityBin.build_split` can hand
         back a lip that is already aligned to the body at z=total_height.
         """
-        p = config.profile
         z0 = config.total_height
         ring = (
             cq.Workplane("XY")
@@ -816,46 +815,24 @@ class StackingLipFeature(BinFeature):
         # cavity cut; a fillet on the ``|Z`` edges never grows the bounding box.
         if config.corner_radius > 0:
             ring = ring.edges("|Z").fillet(config.corner_radius)
-        # The perimeter socket cavity is the full socket cross-section mirrored
-        # into the rim, bottom-up over z=0..lip_h (= profile.total_height):
+        # The perimeter socket cavity is the MEASURED lip cross-section mirrored
+        # into the rim, bottom-up over z=0..lip_h (= the measured lip height):
         #   * at the lip base (z=0) the opening equals the body interior, so the
         #     cavity is CONTINUOUS with the body cavity below -- no downward
         #     step, no flat ledge,
-        #   * a bottom chamfer LEAD-IN narrows the opening from the interior to
-        #     the seat as z rises; its height is sized so this downward-facing
-        #     surface is <=45 deg from vertical (horizontal run per side <=
-        #     vertical rise) -> self-supporting, prints clean without support,
+        #   * a bottom LEAD-IN narrows the opening from the interior to the
+        #     measured seat as z rises; at the defaults it runs 0.70/side over a
+        #     0.70 mm rise = exactly 45 deg (the self-supporting limit),
         #   * a straight vertical SEAT run (the ledge a stacked bin's base drops
-        #     onto), then
+        #     onto) at the measured 37.70 seat opening, then
         #   * the flared MOUTH (widest) at the top face -- an upward-facing
         #     surface, so it is self-supporting regardless of angle.
-        # The mouth leaves ``lip_wall`` of rim at the top on every side and the
-        # seat steps in ``chamfer_top`` per side from the mouth, both from the
-        # shared profile, so the opening tracks the interior (~inner_width x
-        # inner_length) across the whole perimeter instead of a single hole.
-        mouth_w = config.width - 2 * config.lip_wall
-        mouth_l = config.length - 2 * config.lip_wall
-        seat_w = mouth_w - 2 * p.chamfer_top
-        seat_l = mouth_l - 2 * p.chamfer_top
-        # Bottom lead-in: flare the seat out to the body interior going DOWN.
-        # Size its height from the widest per-side horizontal run so the slope
-        # is <=45 deg (run <= rise) on BOTH axes; clamp to leave a seat run.
-        run = max(
-            (config.inner_width - seat_w) / 2.0,
-            (config.inner_length - seat_l) / 2.0,
-            0.0,
-        )
-        max_lead = config.lip_h - p.chamfer_top  # keep room for the mouth flare
-        lead_h = min(run, max_lead) if max_lead > 0 else 0.0
-        base_w = seat_w + 2 * lead_h  # <=45 deg: base opening = interior cap
-        base_l = seat_l + 2 * lead_h
-        straight_top = config.lip_h - p.chamfer_top  # z where the mouth begins
-        sizes = (
-            (0.0, base_w, base_l),            # lip base: continuous w/ interior
-            (lead_h, seat_w, seat_l),         # top of the <=45 deg lead-in
-            (straight_top, seat_w, seat_l),   # top of the vertical seat run
-            (config.lip_h, mouth_w, mouth_l),  # flared mouth at the top face
-        )
+        # ``config.lip_planes()`` is the single source of these (z, w, l) planes
+        # (seat = inner - 2*lip_seat_step, mouth = width - 2*lip_mouth_inset), so
+        # the opening tracks the interior across the whole perimeter and the lip
+        # seat matches the baseplate socket seat by construction.
+        sizes = config.lip_planes()
+        mouth_w, mouth_l = sizes[-1][1], sizes[-1][2]  # the top (mouth) plane
         # The lip opening's inner corners are ROUNDED CONCENTRIC with the outer
         # rim corners, exactly like the body cavity below -- a real Gridfinity
         # lip has a rounded inner opening, not a sharp square. Each plane's

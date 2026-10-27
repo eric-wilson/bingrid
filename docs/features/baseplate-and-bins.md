@@ -9,13 +9,25 @@ a reusable `meshtools` package for measuring reference meshes.
 socket profile once. The baseplate socket, the bin foot, and the stacking lip
 all derive from it via `profile_planes()` / `foot_planes()` and the
 `_loft_profile` helper in `geometry.py`, so the three always mate. A `rel=1e-9`
-volume/bbox regression guard pins the plate socket so the refactor can't shift
-it (baseline socket volume 1619.095).
+volume/bbox regression guard pins the plate socket (baseline socket volume
+1531.345 for a 1x1 at height 5.0).
 
-Dataclass profile defaults are the spec source of truth
-(`chamfer_top=2.2`, `straight=1.75` → mouth 41.9, total height 4.8). Note the
-plate CLI exposes slightly different defaults (2.15 / 1.8); tests build configs
-directly, so they exercise the dataclass values.
+The profile is a **measured carbon-copy** of the reference Gridfinity part
+(re-measured at fine z-steps). Dataclass profile defaults — now matched exactly
+by both the plate CLI (`python -m bingrid.cli`) and the bin CLI
+(`python -m bingrid.bin`):
+
+- `top_opening = 37.7` (straight-section seat opening),
+- `chamfer_top = 2.1` (mouth flare → `mouth_opening = 37.7 + 2*2.1 = 41.9`,
+  kept strictly below the 42 mm pitch so the plate wall survives),
+- `straight = 1.75` (vertical seat run),
+- `chamfer_bottom = 0.80` (lower lead-in),
+- `bottom_inset = 0.75` (per-side narrowing → `bottom_opening = 36.2`),
+- so `total_height = 2.1 + 1.75 + 0.80 = 4.65 mm`.
+
+Because the socket is shared, correcting these constants deliberately moved the
+**plate socket** too (in lockstep with the bin foot and lip) — the baseplate
+generator's geometry code is unchanged; only the shared constants moved.
 
 ## Baseplate / frame
 
@@ -42,51 +54,62 @@ Key dimensions (derived from the shared profile, verified against the spec):
   outer footprint / corner center). Configurable via `--corner-radius`
   (default 3.75, `0` = sharp); rounding only removes material inside the
   footprint, so the bounding box stays `N*42 - 0.5` unchanged.
+- **Body wall & interior:** the body wall is **1.2 mm/side**, so the interior
+  opening is **39.10 mm** per cell (`footprint - 2.4`).
 - **Rounded interior opening:** the **inner** opening corners — the hollow
   cavity *and* the stacking-lip's inner opening — are also **rounded concentric
   with the outer corners** (real Gridfinity), not left sharp 90° squares, so the
   wall keeps a uniform thickness wrapping each corner. Each interior radius is
   **derived** from the single `corner_radius` by subtracting that opening's
   per-side inset (same concentric-corner thinking as the foot, no second radius
-  constant): the cavity is `corner_radius - wall` (≈ **2 mm** for the default
-  wall), and the lip opening tapers from the seat up to ~2 mm at the mouth near
-  the top rim. Clamped to ≥ 0 (a thick wall/sharp outer falls back to a square
-  interior). (An earlier version cut the interior from sharp rectangles, so the
-  inner corners were square while the outer were rounded; fixed.)
-- **Height:** 7 mm per unit + ~3.8 mm base. `--units 6` body = 45.8 mm tall.
-- **Foot:** the socket's **solid complement** (a male plug) — same z-orientation
-  as the socket (narrow at low z, wide at high z), NOT a vertical mirror. The
-  foot plugs into the plate socket. Its corners are **rounded concentric with
-  the body corners** rather than left sharp: the per-level radius tapers down
-  the foot (~3.75 mm where the foot flares into the body, down to ~1.3 mm near
-  the base), computed as `corner_radius - (foot_ref_half - foot_half)` so every
-  foot plane's corner arc shares the body corner's center. Keeping the foot
-  corners aligned under the body corners means a bin's foot seats/stacks against
-  the rounded receiving socket without binding, and the foot-to-body transition
-  closes with no open-air sliver at the footprint corners. (An earlier version
-  left the foot with sharp 90° corners, which bound on stacking and left open
-  vertical gaps at two corners; fixed.) Sizing and `foot_clearance` are
-  unchanged, so the foot still plugs into a baseplate socket.
+  constant): the cavity inner corner is `corner_radius - wall = 3.75 - 1.2 =`
+  **2.54 mm**, and the **lip-seat inner corner is ≈ 1.85 mm**
+  (`corner_radius - resolved_lip_wall = 3.75 - 1.90`) — a larger, measured curve
+  than the pre-rebuild rim. Clamped to ≥ 0 (a thick wall/sharp outer falls back
+  to a square interior).
+- **Height:** 7 mm per unit + ~3.65 mm base. `--units 5` → body 35 mm,
+  `total_height` 38.65 mm. Relative to the pre-rebuild bin the carbon-copy
+  profile lowers the overall height by **1.15 mm** — the lip height drops 1.0 mm
+  (4.80 → 3.80) and the base height drops 0.15 mm (profile `total_height`
+  4.80 → 4.65). (The overall-height **model** — base + units*7 + lip — still
+  differs from how the reference bin encodes height, so a generated U5 bin is
+  ~42.45 mm tall vs the reference's 38.80 mm. That pre-existing height-model
+  mismatch is a tracked backlog item, out of scope for the carbon-copy profile.)
+- **Foot (measured angled taper):** the socket's **solid complement** (a male
+  plug) — same z-orientation as the socket (narrow at low z, wide at high z),
+  NOT a vertical mirror. The foot is a **continuous angled taper**, not a near-
+  straight wall: it widens from a **35.70 mm base** up through an angled lower
+  lead-in to a **37.20 mm straight seating section** (held over ~0.80–2.55 mm),
+  then flares to the body footprint. The 37.20 straight seat drops into the plate
+  socket seat (37.70) — and into another bin's lip seat (also 37.70) — with
+  0.25 mm/side clearance. Its corners are **rounded concentric with the body
+  corners**: the per-level radius tapers up the foot (base **~1.57 mm**, upper
+  **~2.47 mm**, approaching the body's 3.75 mm where the foot flares into the
+  body), computed as `corner_radius - (foot_ref_half - foot_half)` so every foot
+  plane's corner arc shares the body corner's center — so the foot seats without
+  binding and the foot-to-body transition closes with no open-air corner sliver.
 - **Floor:** with `floor > 0` (default), a **continuous full-footprint slab**
   joins all cells into one solid; the interior cavity is cut a full `floor`
   thickness above the feet (`cavity_bottom = base_height + floor`). `floor = 0`
   keeps the intentional open bottom. (An earlier bug left an inter-cell channel
   because the per-cell feet never got a bridging floor; fixed.)
-- **Stacking lip:** an additive **full-perimeter rim** above the body whose
-  opening tracks the interior footprint (≈ `inner_width × inner_length`), so the
-  bin stays open-top across its whole footprint. The rim is the **full shared
-  socket cross-section** mirrored into the perimeter — a bottom chamfer lead-in,
-  a straight vertical seat run, and a flared top mouth — so its height is
-  `profile.total_height` (≈ 4.8 mm) and a bin stacks on a bin exactly like it
-  seats on a baseplate. The **underside is chamfered (≤45°, self-supporting)**
-  rather than a flat downward-facing ledge: at the `z = total_height` mating
-  plane the lip opening equals the body interior and tapers inward going up, so
-  the lip prints clean without support and without stringing. (The lip is the
-  socket cross-section swept around the rectangular perimeter — NOT a single
-  socket stamped in the center; that earlier bug left a solid top deck with one
-  small hole and was fixed. An earlier lip also omitted the bottom chamfer,
-  leaving a flat overhanging ledge under the seat; adding the full profile makes
-  it self-supporting.)
+- **Stacking lip (measured seat ledge):** an additive **full-perimeter rim**
+  above the body whose opening tracks the interior footprint, so the bin stays
+  open-top across its whole footprint. Its cross-section is the **measured lip
+  profile** (`lip_planes()`): continuous with the body interior (39.10) at the
+  base, a **self-supporting lead-in** (0.70 mm/side over a 0.70 mm rise = exactly
+  45°, the limit) down to the **seat opening 37.70**, a straight **seat run
+  (1.90 mm)** — the ledge a stacked bin's foot drops onto — then a flared **mouth
+  (39.90, inset `lip_mouth_inset` 0.80/side)** at the top face. Total lip height
+  is **3.80 mm** (lead 0.70 + seat 1.90 + mouth 1.20). The **seat opening 37.70
+  is the same as the baseplate socket seat** (`foot_straight_opening +
+  2*lip_clearance`), so a bin stacks on a bin exactly like it seats on a
+  baseplate, and the pre-rebuild "inner lip too big" (the old seat opened to
+  34.70) is fixed. The rim wall is `resolved_lip_wall` **≈ 1.90 mm** (derived
+  `(cell_footprint - lip_seat_opening)/2`, or overridden with `--lip-wall`). The
+  new `lip_mouth_inset` / `lip_lead_h` / `lip_mouth_h` are library-only measured
+  constants (no CLI flag); only `--lip-wall` and `--lip-clearance` are
+  user-facing lip knobs.
 - Feet center on the full `grid*pitch` lattice so multi-cell bins register with
   plate sockets.
 

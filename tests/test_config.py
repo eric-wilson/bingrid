@@ -108,11 +108,20 @@ def test_profile_mouth_wider_than_top_wider_than_bottom(config_mod):
 
 
 def test_profile_defaults_match_gridfinity_spec(config_mod):
-    # Defaults reproduce the published Gridfinity baseplate socket dimensions.
+    # Defaults are the RE-MEASURED reference socket (carbon-copy profile):
+    # top 37.7, chamfer_top 2.1, straight 1.75, chamfer_bottom 0.80,
+    # bottom_inset 0.75.
     p = config_mod.GridfinityProfile()
-    assert p.top_opening == pytest.approx(37.5)
-    assert p.bottom_opening == pytest.approx(34.3)  # 37.5 - 2*1.6
-    assert p.total_height == pytest.approx(4.8)
+    assert p.top_opening == pytest.approx(37.7)
+    assert p.bottom_opening == pytest.approx(36.2)  # 37.7 - 2*0.75
+    assert p.total_height == pytest.approx(4.65)    # 2.1 + 1.75 + 0.80
+    # Mouth flare stays below the 42 mm pitch (the plate wall invariant).
+    assert p.mouth_opening == pytest.approx(41.9)   # 37.7 + 2*2.1
+    assert p.mouth_opening < 42.0
+    # The foot (socket's solid mate) seats at the measured values.
+    foot = p.foot_planes(0.25)
+    assert foot[0].size == pytest.approx(35.70)     # base
+    assert foot[1].size == pytest.approx(37.20)     # straight seat
 
 
 @pytest.mark.parametrize(
@@ -259,7 +268,7 @@ def test_grid_rejects_height_too_small_for_socket(config_mod):
         config_mod.GridConfig(
             height=2.0,
             magnet=config_mod.MagnetConfig(enabled=False),
-            profile=config_mod.GridfinityProfile(),  # total 4.8 > 2.0
+            profile=config_mod.GridfinityProfile(),  # total 4.65 > 2.0
         )
 
 

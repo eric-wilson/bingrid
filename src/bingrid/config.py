@@ -127,11 +127,14 @@ class GridfinityProfile:
     size, so tiled plates stay compatible and bins seat across seams.
     """
 
-    top_opening: float = 37.5    # Inner opening along the vertical section, mm
-    chamfer_top: float = 2.2     # Top lead-in chamfer height, mm
+    # Measured carbon-copy of the reference socket (re-measured at 0.05 mm
+    # z-steps). total_height = 2.1 + 1.75 + 0.80 = 4.65; bottom_opening = 37.7 -
+    # 2*0.75 = 36.2; mouth_opening = 37.7 + 2*2.1 = 41.9 (< 42 pitch).
+    top_opening: float = 37.7    # Inner opening along the vertical section, mm
+    chamfer_top: float = 2.1     # Top lead-in chamfer height, mm
     straight: float = 1.75       # Vertical section height, mm
-    chamfer_bottom: float = 0.85  # Bottom chamfer height, mm
-    bottom_inset: float = 1.6    # Per-side inward step over the bottom chamfer, mm
+    chamfer_bottom: float = 0.80  # Bottom chamfer height, mm
+    bottom_inset: float = 0.75   # Per-side inward step over the bottom chamfer, mm
 
     def __post_init__(self) -> None:
         for name in ("top_opening", "chamfer_top", "straight", "chamfer_bottom"):
@@ -375,6 +378,7 @@ class BinConfig:
     """
 
     HEIGHT_UNIT = 7.0  # mm per Gridfinity height unit
+    LIP_SEAT_RUN = 1.90  # measured straight-seat run of the stacking lip, mm
 
     grid_x: int = 1              # Cells in X
     grid_y: int = 1              # Cells in Y
@@ -385,7 +389,17 @@ class BinConfig:
     corner_radius: float = 3.75  # Outer vertical corner radius, mm; 0 = sharp
     foot_clearance: float = 0.25  # Per-side gap between foot and socket, mm
     lip_clearance: float = 0.25  # Per-side seating gap inside the lip, mm
-    lip_wall: float = 1.2        # Outer wall of the stacking-lip rim ring, mm
+    # Outer wall of the stacking-lip rim ring, mm. ``None`` (the default)
+    # derives it from the shared socket: ``(width - lip_seat_opening)/2`` = 1.90
+    # for the 1x1 default. Pass a float to override. All geometry reads the
+    # resolved value via ``resolved_lip_wall``, never this raw field.
+    lip_wall: float | None = None
+    # Library-only measured lip constants (no CLI flag): the top-face mouth
+    # inset per side, the self-supporting lead-in z-rise, and the mouth flare
+    # run. Measured from the reference lip sweep.
+    lip_mouth_inset: float = 0.80  # Per-side inset of the flared mouth, mm
+    lip_lead_h: float = 0.70       # z-rise of the self-supporting lead-in, mm
+    lip_mouth_h: float = 1.20      # z-run of the mouth flare, mm
     base_overlap: float = 1.0    # mm the foot's mouth flare overlaps the body
     stacking_lip: bool = True    # Build the stacking lip
     # Painted color-band export (`--3mf-paint`). A horizontal band of the outer
@@ -429,8 +443,14 @@ class BinConfig:
             raise ValueError("foot clearance cannot be negative")
         if self.lip_clearance < 0:
             raise ValueError("lip clearance cannot be negative")
-        if self.lip_wall <= 0:
+        # The resolved lip wall (derived from the socket, or the override) must
+        # be positive. An over-large override that collapses the rim is caught
+        # by the seat/mouth checks below.
+        if self.resolved_lip_wall <= 0:
             raise ValueError("lip wall must be positive")
+        for name in ("lip_mouth_inset", "lip_lead_h", "lip_mouth_h"):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be positive")
         if self.base_overlap < 0:
             raise ValueError("base overlap cannot be negative")
         if self.base_overlap >= self.profile.total_height:
@@ -449,12 +469,22 @@ class BinConfig:
         if self.foot_clearance * 2 >= self.profile.bottom_opening:
             raise ValueError("foot clearance too large; foot collapses")
         if self.stacking_lip:
-            # The lip is a perimeter rim, not a central socket: its opening
-            # tracks the footprint minus the rim wall and the mouth->seat step.
-            # The seat (narrowest ring opening) must stay positive on both axes.
-            step = 2 * self.lip_wall + 2 * self.profile.chamfer_top
-            if min(self.width, self.length) - step <= 0:
+            # The lip steps in from the body interior to the measured seat
+            # opening, then flares out to the mouth at the top face. Guard,
+            # per axis and inline (arithmetic only, no geometry render):
+            #   (a) seat opening stays positive,
+            #   (b) the mouth is wider than the seat (a real upward flare),
+            #   (c) the straight seat run is non-negative.
+            seat_w = self.inner_width - 2 * self.lip_seat_step     # 37.70
+            seat_l = self.inner_length - 2 * self.lip_seat_step    # 37.70
+            mouth_w = self.width - 2 * self.lip_mouth_inset        # 39.90
+            mouth_l = self.length - 2 * self.lip_mouth_inset       # 39.90
+            if min(seat_w, seat_l) <= 0:
                 raise ValueError("wall too thin for stacking lip")
+            if mouth_w <= seat_w or mouth_l <= seat_l:
+                raise ValueError("stacking lip has no flare (mouth <= seat)")
+            if self.lip_h - self.lip_lead_h - self.lip_mouth_h < -1e-9:
+                raise ValueError("stacking lip has no seat run")
         if self.paint_mode not in ("lip", "band"):
             raise ValueError("paint_mode must be 'lip' or 'band'")
         if self.color_band_extruder < 2:
@@ -491,6 +521,111 @@ class BinConfig:
         """
         top_size = self.profile.foot_planes(self.foot_clearance)[-1].size
         return top_size / 2.0
+
+    @property
+    def foot_straight_opening(self) -> float:
+        """Outer size of the foot's straight seating section, mm.
+
+        The socket's straight seat (``top_opening``) minus the foot clearance on
+        each side = ``37.7 - 0.5 = 37.20`` for the defaults. This is the foot's
+        actual contact width where it seats in a plate socket or another bin's
+        lip seat.
+        """
+        return self.profile.top_opening - 2 * self.foot_clearance
+
+    @property
+    def lip_seat_opening(self) -> float:
+        """Inner seat opening of the stacking lip, mm.
+
+        Tied to the shared socket and the live ``lip_clearance`` so bin-in-bin
+        fit matches bin-in-plate fit by construction:
+        ``foot_straight_opening + 2*lip_clearance = 37.20 + 0.50 = 37.70`` --
+        the same 37.70 as the baseplate socket seat. A stacked bin's foot
+        (37.20 straight) drops onto this seat with 0.25 mm/side clearance.
+        """
+        return self.foot_straight_opening + 2 * self.lip_clearance
+
+    @property
+    def _cell_inner(self) -> float:
+        """Interior opening of a SINGLE cell, mm.
+
+        The per-cell footprint is ``pitch - 0.5`` (the same ``N*pitch - 0.5``
+        rule at N=1), so one cell's interior is ``pitch - 0.5 - 2*wall`` =
+        ``42 - 0.5 - 2.4 = 39.10``. The lip seat step is keyed off this so it is
+        the SAME per side on every axis and every grid size (not re-derived from
+        the wide ``inner_width`` of a multi-cell bin).
+        """
+        return self.pitch - 0.5 - 2 * self.wall
+
+    @property
+    def lip_seat_step(self) -> float:
+        """Per-side inward step from the body interior to the lip seat, mm.
+
+        ``(cell_inner - lip_seat_opening)/2`` = ``(39.10 - 37.70)/2 = 0.70``.
+        Grid-independent: both axes step in by this same amount, so a 1x1 has
+        ``seat_w == seat_l`` and a 1x2 short-axis seat is
+        ``inner_length - 2*lip_seat_step`` (never ~42 -- the old single-socket
+        bug).
+        """
+        return (self._cell_inner - self.lip_seat_opening) / 2.0
+
+    @property
+    def lip_seat_run(self) -> float:
+        """Straight seat run of the lip, mm (read-back of ``LIP_SEAT_RUN``).
+
+        Derived as ``lip_h - lip_lead_h - lip_mouth_h`` so it reconciles with
+        the measured segments (1.90 for the defaults); the authoritative value
+        is the ``LIP_SEAT_RUN`` class constant.
+        """
+        return self.lip_h - self.lip_lead_h - self.lip_mouth_h
+
+    @property
+    def resolved_lip_wall(self) -> float:
+        """The stacking-lip rim wall, resolving ``None`` to the derived value.
+
+        When ``lip_wall`` is ``None`` (the default) the rim wall falls out of
+        the shared socket, keyed off a SINGLE cell so it is grid-independent:
+        ``(cell_footprint - lip_seat_opening)/2 = (41.5 - 37.70)/2 = 1.90``
+        (``cell_footprint = pitch - 0.5``). An explicit value overrides. All lip
+        geometry and corner math reads this, never the raw ``lip_wall`` field.
+        No cycle: ``lip_seat_opening`` derives from the socket + clearance,
+        independent of ``lip_wall``.
+        """
+        if self.lip_wall is None:
+            return (self.pitch - 0.5 - self.lip_seat_opening) / 2.0
+        return self.lip_wall
+
+    def lip_planes(self) -> tuple[tuple[float, float, float], ...]:
+        """Ordered ``(z, full_width, full_length)`` from the lip base upward.
+
+        ``z`` is LIP-LOCAL (0 at the lip base = world z=``total_height``); the
+        feature offsets by ``total_height`` when building. Numeric values shown
+        for the 1x1 default (width == length == 41.5):
+
+            * z0.00 opening 39.10 (= ``inner_width``): continuous with the body
+              cavity -- no downward ledge,
+            * z0.70 opening 37.70: end of the self-supporting lead-in,
+            * z2.60 opening 37.70: top of the straight seat run,
+            * z3.80 opening 39.90: flared mouth at the top face.
+
+        Seats are per-axis: ``seat_w == seat_l`` for a square 1x1, while a 1x2
+        short-axis seat is ``inner_length - 2*lip_seat_step``. ``lead_h`` is
+        clamped to ``max(lip_lead_h, lip_seat_step)`` so the lead-in underside
+        never exceeds 45 deg (a no-op at the measured defaults).
+        """
+        inner_w, inner_l = self.inner_width, self.inner_length               # 39.10
+        seat_w = self.inner_width - 2 * self.lip_seat_step                   # 37.70
+        seat_l = self.inner_length - 2 * self.lip_seat_step                  # 37.70 (per-axis: inner_length - 2*step)
+        mouth_w = self.width - 2 * self.lip_mouth_inset                      # 39.90
+        mouth_l = self.length - 2 * self.lip_mouth_inset                     # 39.90
+        lead_h = max(self.lip_lead_h, self.lip_seat_step)                    # 0.70 (>=45deg guard)
+        seat_top = lead_h + self.LIP_SEAT_RUN                                # 0.70 + 1.90 = 2.60
+        return (
+            (0.00, inner_w, inner_l),
+            (lead_h, seat_w, seat_l),
+            (seat_top, seat_w, seat_l),
+            (self.lip_h, mouth_w, mouth_l),
+        )
 
     def interior_corner_radius(self, inset: float, opening: float) -> float:
         """Radius for an interior opening inset ``inset`` per side, mm.
@@ -576,16 +711,17 @@ class BinConfig:
     def lip_h(self) -> float:
         """Height of the additive stacking lip (0 when disabled), mm.
 
-        The lip is the full shared socket cross-section mirrored into the rim --
-        top mouth flare, vertical seat run, and a bottom chamfer lead-in -- so
-        its height is ``profile.total_height`` (DRY: the same single source of
-        truth as the baseplate socket and the bin foot). The bottom chamfer is
-        what makes the lip underside self-supporting (<=45 deg) instead of a
-        flat downward-facing ledge, so it prints clean without support.
+        The lip is the measured sum of its three segments: a self-supporting
+        lead-in (``lip_lead_h``), the straight seat run (``LIP_SEAT_RUN``), and
+        the mouth flare (``lip_mouth_h``) = ``0.70 + 1.90 + 1.20 = 3.80``. The
+        lead-in makes the lip underside self-supporting (<=45 deg) instead of a
+        flat downward-facing ledge, so it prints clean without support. The
+        body-below-seam plane (``total_height``) is unchanged, so ``build_split``
+        still splits there and the lip stays purely additive above it.
         """
         if not self.stacking_lip:
             return 0.0
-        return self.profile.total_height
+        return self.lip_lead_h + self.LIP_SEAT_RUN + self.lip_mouth_h
 
     @property
     def resolved_color_band_start(self) -> float:
@@ -627,9 +763,9 @@ class BinConfig:
     def overall_height(self) -> float:
         """Actual top-of-part z a mesh measures (body + lip), mm.
 
-        The lip grows upward from ``total_height`` by ``lip_h`` (the full socket
-        profile height), so the body below the ``z=total_height`` mating plane
-        is unchanged and ``build_split`` still splits there.
+        The lip grows upward from ``total_height`` by ``lip_h`` (the measured
+        lip height), so the body below the ``z=total_height`` mating plane is
+        unchanged and ``build_split`` still splits there.
         """
         return self.total_height + self.lip_h
 

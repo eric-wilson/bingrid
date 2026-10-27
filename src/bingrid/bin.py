@@ -53,30 +53,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="per-side gap between foot and socket, mm (default: 0.25)",
     )
 
-    # Profile group: same five flags as the plate CLI (verbatim defaults) so a
-    # bin can match a custom plate. Note these CLI defaults (2.15/1.8) differ
-    # from the GridfinityProfile dataclass defaults (2.2/1.75) by design.
+    # Profile group: same five flags as the plate CLI (identical defaults) so a
+    # bin matches the plate. These defaults track the GridfinityProfile dataclass
+    # defaults exactly (measured carbon-copy socket).
     opening = parser.add_argument_group("opening profile")
     opening.add_argument(
-        "--profile-top-opening", type=float, default=37.5,
-        help="socket: inner opening at top of the vertical, mm (default: 37.5)",
+        "--profile-top-opening", type=float, default=37.7,
+        help="socket: inner opening at top of the vertical, mm (default: 37.7)",
     )
     opening.add_argument(
-        "--profile-chamfer-top", type=float, default=2.15,
-        help="socket: top 45 deg lead-in height, mm (default: 2.15)",
+        "--profile-chamfer-top", type=float, default=2.1,
+        help="socket: top 45 deg lead-in height, mm (default: 2.1)",
     )
     opening.add_argument(
-        "--profile-straight", type=float, default=1.8,
-        help="socket: vertical section height, mm (default: 1.8)",
+        "--profile-straight", type=float, default=1.75,
+        help="socket: vertical section height, mm (default: 1.75)",
     )
     opening.add_argument(
-        "--profile-chamfer-bottom", type=float, default=0.85,
-        help="socket: bottom chamfer height, mm (default: 0.85)",
+        "--profile-chamfer-bottom", type=float, default=0.80,
+        help="socket: bottom chamfer height, mm (default: 0.80)",
     )
     opening.add_argument(
-        "--profile-bottom-inset", type=float, default=1.6,
+        "--profile-bottom-inset", type=float, default=0.75,
         help="socket: per-side inward step over the bottom chamfer, mm "
-             "(default: 1.6)",
+             "(default: 0.75)",
     )
 
     lip = parser.add_argument_group("stacking lip")
@@ -93,8 +93,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="per-side seating gap inside the lip, mm (default: 0.25)",
     )
     lip.add_argument(
-        "--lip-wall", type=float, default=1.2,
-        help="outer wall of the stacking-lip rim ring, mm (default: 1.2)",
+        "--lip-wall", type=float, default=None,
+        help="outer wall of the stacking-lip rim ring, mm "
+             "(default: derived from the socket, ~1.90)",
     )
     lip.add_argument(
         "--base-overlap", type=float, default=1.0,

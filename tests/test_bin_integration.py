@@ -21,12 +21,13 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-# Pre-refactor plate-socket baseline, captured from the original inline-loft
-# code (GridConfig(grid_x=1, grid_y=1, height=5.0, magnet disabled)). The
-# shared-profile refactor must reproduce this solid to full float precision, so
-# rel=1e-9 fails on any real socket shift (including sub-tolerance ones the
-# spec test's abs=0.1/0.3 cannot see).
-BASELINE_VOLUME = 1619.095071428569
+# Plate-socket baseline for GridConfig(grid_x=1, grid_y=1, height=5.0, magnet
+# disabled), re-measured to the corrected carbon-copy reference profile (top
+# 37.7, chamfer_top 2.1, chamfer_bottom 0.80, bottom_inset 0.75). The socket
+# INTENTIONALLY moved -- the plate socket shares GridfinityProfile with the bin
+# foot/lip, so correcting the profile corrects the socket in lockstep. rel=1e-9
+# still fails on any UNINTENDED shift. BBOX z stays 5.0 (explicit plate height).
+BASELINE_VOLUME = 1531.3452718749968
 BASELINE_BBOX = (42.0000002, 42.0000002, 5.000000200000001)  # xlen, ylen, zlen
 
 
@@ -214,12 +215,12 @@ def test_foot_profile_matches_socket(gridfinity, tmp_path):
     # Single-cell bin so the foot slice `outer` is one foot, not a 2x2 span.
     cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5)
     insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
-    # Narrow bottom ~ bottom_opening - 2*foot_clearance = 33.8.
+    # Narrow bottom ~ bottom_opening - 2*foot_clearance = 35.7 (re-measured).
     narrow = _require_slice(insp, 0.005)
-    assert narrow.outer[0] == pytest.approx(33.8, abs=0.3)
-    # Vertical ~ top_opening - 2*foot_clearance = 37.0.
+    assert narrow.outer[0] == pytest.approx(35.7, abs=0.3)
+    # Vertical ~ top_opening - 2*foot_clearance = 37.2 (re-measured).
     vert = _require_slice(insp, 1.2)
-    assert vert.outer[0] == pytest.approx(37.0, abs=0.3)
+    assert vert.outer[0] == pytest.approx(37.2, abs=0.3)
 
 
 # --- foot corners are rounded and concentric with the body -----------------
@@ -233,7 +234,8 @@ def test_foot_corners_are_rounded_and_taper(gridfinity, tmp_path):
     foot slice fits a positive corner radius, the radius GROWS going up the foot
     (base smaller, approaching the body radius higher up), and the fitted arc
     center is the SAME as the body corner center (concentric) within tolerance.
-    Measured ballpark on the reference part: base ~1.3, upper ~2.3, body 3.75.
+    Re-measured ballpark on the reference part: base ~1.57, upper ~2.47,
+    body 3.75.
     """
     cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5)
     insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
@@ -340,11 +342,11 @@ def test_lip_opening_spans_full_interior(gridfinity, gx, gy, tmp_path):
     open_w = statistics.median(w for (w, _d) in prof.hole_extents)
     open_l = statistics.median(d for (_w, d) in prof.hole_extents)
 
-    # The mouth leaves lip_wall per side off the full footprint. Both axes track
-    # the interior -- and critically the SHORT axis is nowhere near ~42 mm on a
-    # wide bin, which is the single-socket bug this test exists to catch.
-    expected_w = cfg.width - 2 * cfg.lip_wall
-    expected_l = cfg.length - 2 * cfg.lip_wall
+    # The mouth is inset lip_mouth_inset (0.80) per side off the full footprint.
+    # Both axes track the interior -- and critically the SHORT axis is nowhere
+    # near ~42 mm on a wide bin, the single-socket bug this test exists to catch.
+    expected_w = cfg.width - 2 * cfg.lip_mouth_inset
+    expected_l = cfg.length - 2 * cfg.lip_mouth_inset
     assert open_w == pytest.approx(expected_w, abs=1.5)
     assert open_l == pytest.approx(expected_l, abs=1.5)
     # The opening must be close to the body interior, far from a 41.9 mm socket.
@@ -353,32 +355,32 @@ def test_lip_opening_spans_full_interior(gridfinity, gx, gy, tmp_path):
 
 
 def test_lip_seat_steps_inward_from_the_mouth(gridfinity, tmp_path):
-    """The rim steps inward from mouth to seat, mirroring the socket section.
+    """The rim steps inward from the body interior to the MEASURED seat, 37.70.
 
-    The seat (narrowest ring opening) is inset from the flared mouth (at the
-    top) by ~chamfer_top per side on each axis, from the shared
-    GridfinityProfile. That inward step is the seating ledge a stacked bin's
-    base drops onto. The seat run sits ABOVE the self-supporting bottom lead-in
-    (which flares the opening out to the body interior over the lowest
-    ``run`` mm of the lip), so we slice at the midpoint of the seat run rather
-    than near the lip base -- near the base the opening is the wide interior,
-    not the narrow seat.
+    This is the direct regression guard for "the lip is too big" (the old seat
+    landed at 34.70; the measured seat is 37.70). The seat opening on the short
+    axis is ``inner_length - 2*lip_seat_step`` = 37.70 (step 0.70/side); the
+    flared mouth at the top face is inset ``lip_mouth_inset`` 0.80/side (39.90).
+    The seat run sits ABOVE the self-supporting lead-in, so we slice the middle
+    of the lip-local seat run (z 0.70..2.60 from ``lip_planes()``) rather than
+    near the base (where the opening is the wide interior).
     """
     cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6)
-    p = cfg.profile
     insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
 
-    # Lip-local geometry: bottom lead-in height = widest per-side flare run,
-    # then the straight seat run up to ``lip_h - chamfer_top``. Slice the seat
-    # at the middle of that run.
-    mouth_w0 = cfg.width - 2 * cfg.lip_wall
-    seat_w0 = mouth_w0 - 2 * p.chamfer_top
-    lead_h = max((cfg.inner_width - seat_w0) / 2.0,
-                 (cfg.inner_length - (cfg.length - 2 * cfg.lip_wall
-                                      - 2 * p.chamfer_top)) / 2.0, 0.0)
-    seat_mid = (lead_h + (cfg.lip_h - p.chamfer_top)) / 2.0
-    z_seat = cfg.total_height + seat_mid  # in the straight seat run
-    z_mouth = cfg.overall_height - 0.3  # in the flared mouth
+    # Structural guard: the lip seat is tied to the socket + the live clearance.
+    assert cfg.lip_seat_opening - cfg.foot_straight_opening == pytest.approx(
+        2 * cfg.lip_clearance
+    )
+
+    # Lip-local z's come straight from lip_planes(): seat run spans planes[1].z
+    # .. planes[2].z (0.70..2.60). Slice its midpoint; mouth near the top face.
+    planes = cfg.lip_planes()
+    seat_mid_local = (planes[1][0] + planes[2][0]) / 2.0
+    z_seat = cfg.total_height + seat_mid_local
+    # The mouth reaches its full 39.90 only at the top face (the flare ramps up
+    # continuously from the seat), so slice very close to the top.
+    z_mouth = cfg.overall_height - 0.05  # in the flared mouth near the top face
     seat = _require_slice(insp, z_seat)
     mouth = _require_slice(insp, z_mouth)
     assert seat.hole_count == 1 and mouth.hole_count == 1
@@ -388,12 +390,15 @@ def test_lip_seat_steps_inward_from_the_mouth(gridfinity, tmp_path):
     seat_l = statistics.median(d for (_w, d) in seat.hole_extents)
     mouth_l = statistics.median(d for (_w, d) in mouth.hole_extents)
 
-    # Seat is inset from the mouth by ~chamfer_top per side (both axes).
-    assert mouth_w - seat_w == pytest.approx(2 * p.chamfer_top, abs=0.8)
-    assert mouth_l - seat_l == pytest.approx(2 * p.chamfer_top, abs=0.8)
-    # And the seat itself still spans most of the interior, not a tiny hole.
-    assert seat_w > cfg.inner_width - 2 * p.chamfer_top - 1.5
-    assert seat_l > cfg.inner_length - 2 * p.chamfer_top - 1.5
+    # Short axis: the seat is the measured 37.70 (fixes the 34.70 "too big"),
+    # stepped in lip_seat_step (0.70) per side from the 39.10 interior.
+    assert seat_l == pytest.approx(37.70, abs=0.3)
+    assert mouth_l == pytest.approx(39.90, abs=0.3)
+    # Long axis tracks the interior minus the same per-side step.
+    assert seat_w == pytest.approx(cfg.inner_width - 2 * cfg.lip_seat_step, abs=0.5)
+    # Mouth is wider than the seat (a real upward flare), by 2*(step - inset)
+    # on the short axis: mouth 39.90 - seat 37.70 = 2.20.
+    assert mouth_l - seat_l == pytest.approx(2.20, abs=0.5)
 
 
 def _section_interior_xy(insp, z):
@@ -593,6 +598,10 @@ def test_lip_underside_is_self_supporting(gridfinity, tmp_path):
     cfg = gridfinity.BinConfig(grid_x=2, grid_y=1, height_units=6)
     insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
 
+    # The measured lead-in runs lip_seat_step (0.70) per side over lip_lead_h
+    # (0.70) rise = exactly atan(0.70/0.70) = 45 deg, the self-supporting LIMIT.
+    # The budget below includes a +0.05 tolerance so the exact-45-deg case
+    # passes; it still FAILS on the old flat downward ledge (>45 deg).
     z_lo = cfg.total_height - 0.10  # just below the mating plane (body interior)
     z_hi = cfg.total_height + 0.10  # just inside the lip (bottom lead-in)
     lo = _require_slice(insp, z_lo)
@@ -1002,8 +1011,14 @@ def test_painted_3mf_lip_mode_paints_only_the_lip(gridfinity, gx, gy, tmp_path):
         if all(z < seam - eps for z in zs):
             assert paint is None, "a face below the lip seam was painted"
 
-    # The body below the seam is the large majority of the mesh and is unpainted.
-    assert body_unpainted > len(painted)
+    # The body below the seam is substantial and entirely unpainted. (The old
+    # check `body_unpainted > len(painted)` assumed the body dominated the face
+    # count; the carbon-copy lip is now a finely-tessellated 4-plane rounded
+    # loft, so for a small 1x1 the curved lip legitimately carries MORE faces
+    # than the flat body walls below. The meaningful guarantees -- every painted
+    # face is at/above the seam, no below-seam face is painted -- are asserted
+    # above; here we only confirm the body region is non-trivial and unpainted.)
+    assert body_unpainted > 200
 
 
 def test_painted_3mf_lip_mode_is_strictly_welded_and_manifold(gridfinity, tmp_path):
@@ -1147,3 +1162,160 @@ def test_single_build_writes_one_stl(gridfinity, tmp_path):
                     name=exporter.bin_default_name(cfg))
     assert len(list(tmp_path.glob("*.stl"))) == 1
     assert len(list(tmp_path.glob("*.step"))) == 1
+
+
+# =========================================================================
+# Carbon-copy acceptance tests (measured-profile match)
+# =========================================================================
+#
+# These assert the generated bin reproduces the MEASURED reference profile
+# within tolerance. The measured numbers are hardcoded here (the Gridfinity
+# spec is open); no sample file is read or named. Each test documents why it
+# FAILS on the pre-rebuild geometry.
+
+# Hardcoded measured-profile table (full edge-to-edge widths / radii, mm).
+# Re-measured at fine z-steps on the reference bin; the design's source of truth.
+MEASURED = {
+    "foot_base": 35.70,       # foot narrowest, angled start
+    "foot_straight": 37.20,   # foot straight seating section
+    "body_inner": 39.10,      # body interior opening (per cell)
+    "lip_seat": 37.70,        # stacking-lip seat opening
+    "lip_mouth": 39.90,       # flared mouth at the top face
+    "seat_corner": 1.85,      # lip-seat inner corner radius (concentric)
+    "outer_corner": 3.75,     # outer vertical corner radius
+}
+PROFILE_TOL = 0.3  # +-0.3 mm, per the design acceptance band
+
+
+def test_profile_matches_measured_carbon_copy(gridfinity, tmp_path):
+    """PROFILE-MATCH: the generated 1x1 bin reproduces the measured profile.
+
+    Sweeps the generated bin with MeshInspector and asserts outer/inner widths
+    and corner radii at the key z-levels match the hardcoded measured table
+    within +-0.3 mm: foot base 35.70, foot straight 37.20, body inner 39.10,
+    lip seat 37.70, lip mouth 39.90, lip-seat corner 1.85, outer corner 3.75.
+
+    This FAILS on the PRE-REBUILD geometry: the old foot base was 33.80 (vs
+    35.70) and the old lip seat was 34.70 (vs 37.70) -- both ~2-3 mm outside the
+    0.3 mm band. No sample file is read; the targets are hardcoded spec numbers.
+    """
+    cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5)
+    p = cfg.profile
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+
+    # --- foot (outer extents) ---
+    foot_base = _require_slice(insp, 0.005)
+    assert foot_base.outer[0] == pytest.approx(MEASURED["foot_base"], abs=PROFILE_TOL)
+    foot_straight = _require_slice(insp, 1.5)  # in the straight seat run
+    assert foot_straight.outer[0] == pytest.approx(
+        MEASURED["foot_straight"], abs=PROFILE_TOL
+    )
+
+    # --- body interior opening ---
+    body = _require_slice(insp, cfg.base_height + cfg.body_height / 2)
+    assert body.hole_count == 1
+    body_inner = statistics.median(w for (w, _d) in body.hole_extents)
+    assert body_inner == pytest.approx(MEASURED["body_inner"], abs=PROFILE_TOL)
+
+    # --- lip seat and mouth (inner openings) ---
+    planes = cfg.lip_planes()
+    seat_mid = cfg.total_height + (planes[1][0] + planes[2][0]) / 2.0
+    seat = _require_slice(insp, seat_mid)
+    assert seat.hole_count == 1
+    seat_open = statistics.median(w for (w, _d) in seat.hole_extents)
+    assert seat_open == pytest.approx(MEASURED["lip_seat"], abs=PROFILE_TOL)
+
+    # Mouth reaches full 39.90 only at the top face; slice very close to it.
+    mouth = _require_slice(insp, cfg.overall_height - 0.05)
+    mouth_open = statistics.median(w for (w, _d) in mouth.hole_extents)
+    assert mouth_open == pytest.approx(MEASURED["lip_mouth"], abs=PROFILE_TOL)
+
+    # --- corner radii ---
+    # Outer body corner (exterior arc).
+    body_ext = _section_exterior_xy(insp, cfg.base_height + cfg.body_height / 2)
+    if body_ext is None:
+        pytest.skip("trimesh 2D section extras unavailable")
+    _bx, _by, outer_r = _fit_corner_arc(*body_ext)
+    assert outer_r == pytest.approx(MEASURED["outer_corner"], abs=PROFILE_TOL)
+
+    # Lip-seat inner corner (interior arc at the seat run) ~1.85, concentric.
+    seat_ring = _section_interior_xy(insp, seat_mid)
+    assert seat_ring is not None
+    fit = _fit_corner_arc(*seat_ring)
+    assert fit is not None, "lip seat inner corner is sharp, not rounded"
+    sx, sy, seat_r = fit
+    assert seat_r == pytest.approx(MEASURED["seat_corner"], abs=PROFILE_TOL)
+    # Concentric with the outer corner (shared arc center at footprint/2 - R).
+    body_cc_x = cfg.width / 2 - cfg.corner_radius
+    body_cc_y = cfg.length / 2 - cfg.corner_radius
+    assert abs(sx) == pytest.approx(body_cc_x, abs=0.6)
+    assert abs(sy) == pytest.approx(body_cc_y, abs=0.6)
+
+
+def test_foot_taper_is_continuous_and_socket_compatible(gridfinity, tmp_path):
+    """The foot is an angled continuous taper (no vertical straight-wall base).
+
+    A near-base slice must be NARROWER than a slightly higher slice -- the foot
+    widens continuously from the measured base (35.70) up toward the straight
+    seat (37.20). This FAILS on the old near-straight / squared base. Also
+    re-confirms socket compatibility: the foot straight (37.20) seats in the
+    socket/lip seat (37.70) with ~0.25 mm/side.
+    """
+    cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5)
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+
+    near_base = _require_slice(insp, 0.05)   # in the angled lower chamfer
+    higher = _require_slice(insp, 0.60)      # further up the chamfer
+    # Continuous taper: the base is genuinely narrower (not a vertical wall).
+    assert near_base.outer[0] < higher.outer[0] - 0.3
+    assert near_base.outer[0] == pytest.approx(MEASURED["foot_base"], abs=PROFILE_TOL)
+
+    # Socket-compatible: the straight seat is the measured 37.20, which drops
+    # into the socket/lip seat opening (37.70) with lip_clearance/side.
+    assert cfg.foot_straight_opening == pytest.approx(MEASURED["foot_straight"])
+    straight = _require_slice(insp, 1.5)
+    assert straight.outer[0] == pytest.approx(MEASURED["foot_straight"], abs=PROFILE_TOL)
+
+
+def test_lip_stepback_fixes_too_big_opening(gridfinity, tmp_path):
+    """The lip seat steps in to 37.70 (fixing the 34.70 "lip opening too big").
+
+    The seat opening is lip_seat_step (0.70) per side in from the body interior,
+    landing on the measured 37.70. This FAILS on the pre-rebuild lip whose seat
+    opened to 34.70 (~3 mm too big, so a stacked bin sat loosely).
+    """
+    cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5)
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+    planes = cfg.lip_planes()
+    seat_mid = cfg.total_height + (planes[1][0] + planes[2][0]) / 2.0
+    seat = _require_slice(insp, seat_mid)
+    assert seat.hole_count == 1
+    seat_open = statistics.median(w for (w, _d) in seat.hole_extents)
+    assert seat_open == pytest.approx(MEASURED["lip_seat"], abs=PROFILE_TOL)
+    # Structurally the seat is the interior minus a fixed per-side step.
+    assert seat_open == pytest.approx(cfg.inner_width - 2 * cfg.lip_seat_step, abs=0.3)
+
+
+def test_lip_seat_inner_corner_radius_is_measured_and_concentric(gridfinity, tmp_path):
+    """The lip-seat inner corner is the larger measured radius (~1.85).
+
+    Concentric with the 3.75 outer corner (shared arc center). This FAILS on the
+    pre-rebuild lip whose tighter rim gave a smaller seat corner (and the old
+    seat sat at 34.70, a different inset entirely).
+    """
+    cfg = gridfinity.BinConfig(grid_x=1, grid_y=1, height_units=5)
+    insp = _export_inspect(gridfinity, gridfinity.GridfinityBin(cfg).build(), tmp_path)
+    planes = cfg.lip_planes()
+    seat_mid = cfg.total_height + (planes[1][0] + planes[2][0]) / 2.0
+    ring = _section_interior_xy(insp, seat_mid)
+    if ring is None:
+        pytest.skip("trimesh 2D section extras unavailable")
+    fit = _fit_corner_arc(*ring)
+    assert fit is not None, "lip seat inner corner is sharp, not rounded"
+    xc, yc, r = fit
+    assert r == pytest.approx(MEASURED["seat_corner"], abs=PROFILE_TOL)
+    # Concentric with the outer corner.
+    body_cc_x = cfg.width / 2 - cfg.corner_radius
+    body_cc_y = cfg.length / 2 - cfg.corner_radius
+    assert abs(xc) == pytest.approx(body_cc_x, abs=0.6)
+    assert abs(yc) == pytest.approx(body_cc_y, abs=0.6)

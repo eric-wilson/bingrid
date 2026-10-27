@@ -1,10 +1,10 @@
 """Validation and derived-value tests for BinConfig and the shared profile.
 
 Pure-Python (no CadQuery render), so they run under the default selection.
-All numbers are the published Gridfinity spec reduced to the DATACLASS profile
-defaults (top_opening=37.5, chamfer_top=2.2, straight=1.75, chamfer_bottom=0.85,
-bottom_inset=1.6 -> total_height=4.8, mouth_opening=41.9, bottom_opening=34.3),
-NOT the plate CLI defaults (2.15/1.8). Never references samples/ by name.
+All numbers are the RE-MEASURED carbon-copy socket, now the DATACLASS profile
+defaults (top_opening=37.7, chamfer_top=2.1, straight=1.75, chamfer_bottom=0.80,
+bottom_inset=0.75 -> total_height=4.65, mouth_opening=41.9, bottom_opening=36.2).
+Never references samples/ by name.
 """
 import pytest
 
@@ -30,17 +30,14 @@ def test_footprint_is_n_times_pitch_minus_half(config_mod, gx, gy, exp_w, exp_l)
 def test_height_math_matches_spec(config_mod):
     cfg = config_mod.BinConfig(height_units=5)
     assert cfg.body_height == pytest.approx(35.0)
-    # base_height = profile.total_height (4.8) - base_overlap (1.0) = 3.8
-    assert cfg.base_height == pytest.approx(3.8, abs=0.01)
-    # total = 3.8 + 35.0 = 38.8 (tight tolerance: spec number, not masked error)
-    assert cfg.total_height == pytest.approx(38.8, abs=0.2)
-    # The lip is the full socket cross-section mirrored into the rim, so it adds
-    # profile.total_height = chamfer_top + straight + chamfer_bottom
-    # = 2.2 + 1.75 + 0.85 = 4.8 mm. (The earlier 3.95 mm value omitted the
-    # bottom chamfer, which is exactly the self-supporting lead-in; 4.8 mm is
-    # the correct, full-profile lip.)
-    assert cfg.lip_h == pytest.approx(4.8, abs=0.01)
-    assert cfg.overall_height == pytest.approx(38.8 + 4.8, abs=0.2)
+    # re-measured: base_height = profile.total_height (4.65) - base_overlap (1.0) = 3.65
+    assert cfg.base_height == pytest.approx(3.65, abs=0.01)
+    # total = 3.65 + 35.0 = 38.65
+    assert cfg.total_height == pytest.approx(38.65, abs=0.2)
+    # The lip is the measured sum of its three segments: lead-in 0.70 + seat
+    # run 1.90 + mouth flare 1.20 = 3.80 mm (re-measured carbon-copy lip).
+    assert cfg.lip_h == pytest.approx(3.80, abs=0.01)
+    assert cfg.overall_height == pytest.approx(38.65 + 3.80, abs=0.2)
 
 
 def test_overall_height_without_lip_equals_total(config_mod):
@@ -70,14 +67,14 @@ def test_inner_cavity_is_width_minus_two_walls(config_mod):
 
 def test_cavity_bottom_sits_a_floor_above_the_feet(config_mod):
     # The cavity starts a floor slab's thickness above the top of the feet
-    # (base_height=3.8), so base_height..base_height+floor stays solid: the
-    # continuous floor slab that joins every cell.
-    assert config_mod.BinConfig(floor=0.5).cavity_bottom == pytest.approx(4.3, abs=0.01)
-    assert config_mod.BinConfig(floor=1.0).cavity_bottom == pytest.approx(4.8, abs=0.01)
+    # (re-measured base_height=3.65), so base_height..base_height+floor stays
+    # solid: the continuous floor slab that joins every cell.
+    assert config_mod.BinConfig(floor=0.5).cavity_bottom == pytest.approx(4.15, abs=0.01)
+    assert config_mod.BinConfig(floor=1.0).cavity_bottom == pytest.approx(4.65, abs=0.01)
     # Open bottom (floor=0) -> cavity starts right at base_height, no slab.
-    assert config_mod.BinConfig(floor=0.0).cavity_bottom == pytest.approx(3.8, abs=0.01)
+    assert config_mod.BinConfig(floor=0.0).cavity_bottom == pytest.approx(3.65, abs=0.01)
     # A thick floor still sits base_height above its own thickness.
-    assert config_mod.BinConfig(floor=6.0, height_units=6).cavity_bottom == pytest.approx(9.8, abs=0.01)
+    assert config_mod.BinConfig(floor=6.0, height_units=6).cavity_bottom == pytest.approx(9.65, abs=0.01)
 
 
 # --- validation ------------------------------------------------------------
@@ -96,14 +93,17 @@ def test_cavity_bottom_sits_a_floor_above_the_feet(config_mod):
         ({"corner_radius": 25.0}, "corner radius too large"),
         ({"foot_clearance": -1}, "foot clearance cannot be negative"),
         ({"lip_clearance": -1}, "lip clearance cannot be negative"),
+        # explicit lip_wall override of 0 is rejected via resolved_lip_wall
         ({"lip_wall": 0}, "lip wall must be positive"),
+        # measured lip segment constants must be positive
+        ({"lip_mouth_inset": 0}, "lip_mouth_inset must be positive"),
+        ({"lip_lead_h": 0}, "lip_lead_h must be positive"),
+        ({"lip_mouth_h": 0}, "lip_mouth_h must be positive"),
         ({"base_overlap": -1}, "base overlap cannot be negative"),
         ({"base_overlap": 5.0}, "base overlap must be less than"),
         ({"wall": 21.0}, "no interior left"),
         ({"floor": 100.0, "height_units": 1}, "floor must be less than"),
         ({"foot_clearance": 20.0}, "foot collapses"),
-        # lip rim wall so thick the perimeter seat opening collapses (<=0)
-        ({"lip_wall": 20.0}, "wall too thin for stacking lip"),
         # color band geometry validation (only enforced in band mode)
         ({"color_band_enabled": True, "paint_mode": "band",
           "color_band_height": 0}, "color band height"),
@@ -158,11 +158,69 @@ def test_color_band_taller_than_wall_rejected(config_mod):
                              paint_mode="band", color_band_height=100.0)
 
 
+# --- stacking-lip derivation (measured carbon-copy) ------------------------
+
+def test_lip_derivation_matches_measured_profile(config_mod):
+    """The lip seat/step/wall/height fall out of the shared socket + clearance.
+
+    These are pure arithmetic (no render): the seat opening equals the measured
+    37.70 (and the baseplate socket seat), the per-side step is 0.70, the rim
+    wall derives to 1.90, and the lip is the 3.80 measured sum of its segments.
+    """
+    cfg = config_mod.BinConfig()  # 1x1 default
+    assert cfg.foot_straight_opening == pytest.approx(37.20)
+    assert cfg.lip_seat_opening == pytest.approx(37.70)
+    assert cfg.resolved_lip_wall == pytest.approx(1.90)
+    assert cfg.lip_seat_step == pytest.approx(0.70)
+    assert cfg.lip_h == pytest.approx(3.80)
+    assert cfg.lip_seat_run == pytest.approx(1.90)
+    # Bin-in-bin stacking gap is structurally tied to the live lip_clearance.
+    assert cfg.lip_seat_opening - cfg.foot_straight_opening == pytest.approx(
+        2 * cfg.lip_clearance
+    )
+    # lip_planes(): continuous 39.10 base, 37.70 seat run, 39.90 flared mouth.
+    planes = cfg.lip_planes()
+    assert [tuple(round(x, 2) for x in pl) for pl in planes] == [
+        (0.00, 39.10, 39.10),
+        (0.70, 37.70, 37.70),
+        (2.60, 37.70, 37.70),
+        (3.80, 39.90, 39.90),
+    ]
+    assert planes[-1][1] > planes[1][1]  # mouth wider than seat (real flare)
+
+
+def test_lip_step_and_wall_are_grid_independent(config_mod):
+    """A wide bin keeps the SAME per-side step (0.70) and rim wall (1.90).
+
+    The seat tracks each axis's interior minus a fixed step, so a 1x2 short-axis
+    seat is inner_length - 2*step (37.70), never ~42 (the old single-socket
+    bug). The step/wall are keyed off a single cell, not the wide interior.
+    """
+    cfg = config_mod.BinConfig(grid_x=2, grid_y=1, height_units=6)
+    assert cfg.lip_seat_step == pytest.approx(0.70)
+    assert cfg.resolved_lip_wall == pytest.approx(1.90)
+    planes = cfg.lip_planes()
+    # seat plane: long axis 79.70, short axis 37.70 (= inner_length - 2*step).
+    assert planes[1][1] == pytest.approx(cfg.inner_width - 2 * 0.70)   # 79.70
+    assert planes[1][2] == pytest.approx(cfg.inner_length - 2 * 0.70)  # 37.70
+    assert planes[1][2] == pytest.approx(37.70)
+
+
+def test_lip_wall_override_is_honored(config_mod):
+    """An explicit lip_wall overrides the derived value via resolved_lip_wall."""
+    cfg = config_mod.BinConfig(lip_wall=2.5)
+    assert cfg.resolved_lip_wall == pytest.approx(2.5)
+    # The derivation is used only when the field is None.
+    assert config_mod.BinConfig(lip_wall=None).resolved_lip_wall == pytest.approx(1.90)
+
+
 # --- shared profile guards -------------------------------------------------
 
 def test_profile_planes_regression(config_mod):
     planes = config_mod.GridfinityProfile().profile_planes()
-    expected = [(0.0, 34.3), (0.85, 37.5), (2.6, 37.5), (4.8, 41.9)]
+    # re-measured carbon-copy socket: bottom 36.2, straight 37.7, mouth 41.9,
+    # total 4.65 (chamfer_bottom 0.80 + straight 1.75 -> 2.55).
+    expected = [(0.0, 36.2), (0.80, 37.7), (2.55, 37.7), (4.65, 41.9)]
     assert len(planes) == 4
     for p, (z, size) in zip(planes, expected):
         assert p.z == pytest.approx(z)
@@ -223,5 +281,5 @@ def test_foot_planes_derive_from_socket(config_mod):
     for f, s in zip(foot, socket):
         assert f.z == pytest.approx(s.z)          # no z flip
         assert f.size == pytest.approx(s.size - 0.5)  # each minus 2*0.25
-    # Spot-check the derived sizes: 33.8 / 37.0 / 37.0 / 41.4
-    assert [round(f.size, 2) for f in foot] == [33.8, 37.0, 37.0, 41.4]
+    # Spot-check the derived sizes (re-measured): 35.7 / 37.2 / 37.2 / 41.4
+    assert [round(f.size, 2) for f in foot] == [35.7, 37.2, 37.2, 41.4]

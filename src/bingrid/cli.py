@@ -55,25 +55,25 @@ def build_parser() -> argparse.ArgumentParser:
              "'taper' = simple draft (default: socket)",
     )
     opening.add_argument(
-        "--profile-top-opening", type=float, default=37.5,
-        help="socket: inner opening at top of the vertical, mm (default: 37.5)",
+        "--profile-top-opening", type=float, default=37.7,
+        help="socket: inner opening at top of the vertical, mm (default: 37.7)",
     )
     opening.add_argument(
-        "--profile-chamfer-top", type=float, default=2.15,
-        help="socket: top 45 deg lead-in height, mm (default: 2.15)",
+        "--profile-chamfer-top", type=float, default=2.1,
+        help="socket: top 45 deg lead-in height, mm (default: 2.1)",
     )
     opening.add_argument(
-        "--profile-straight", type=float, default=1.8,
-        help="socket: vertical section height, mm (default: 1.8)",
+        "--profile-straight", type=float, default=1.75,
+        help="socket: vertical section height, mm (default: 1.75)",
     )
     opening.add_argument(
-        "--profile-chamfer-bottom", type=float, default=0.85,
-        help="socket: bottom chamfer height, mm (default: 0.85)",
+        "--profile-chamfer-bottom", type=float, default=0.80,
+        help="socket: bottom chamfer height, mm (default: 0.80)",
     )
     opening.add_argument(
-        "--profile-bottom-inset", type=float, default=1.6,
+        "--profile-bottom-inset", type=float, default=0.75,
         help="socket: per-side inward step over the bottom chamfer, mm "
-             "(default: 1.6)",
+             "(default: 0.75)",
     )
 
     taper = parser.add_argument_group("taper (legacy style)")
