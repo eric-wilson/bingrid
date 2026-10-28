@@ -1,15 +1,17 @@
-"""Interactive layer: rich formatting + prompt_toolkit input.
+"""Interactive layer: rich formatting + inline single-line input.
 
 Two entry points, both only ever called once the dispatcher has confirmed an
 interactive (TTY, not --no-input) session:
 
-- :func:`select_item` — arrow-select menu over the registered generators.
+- :func:`select_item` — inline numbered menu over the registered generators.
 - :func:`walk_options` — guided per-option walkthrough producing a Namespace.
 
-All reads go through the thin wrappers :func:`_ask_text` / :func:`_ask_choice` /
-:func:`_ask_bool`, which tests patch to script answers. Value-range validation
-is NOT done here (owned by ``*Config.__post_init__``); the walkthrough only does
-type conversion, re-prompting on a conversion failure.
+Every prompt is a plain single-line read rendered in the normal terminal flow;
+no full-screen/alternate-screen widgets. All reads go through the thin wrappers
+:func:`_ask_text` / :func:`_ask_choice` / :func:`_ask_bool` (which in turn call
+:func:`_read_line`), so tests patch them to script answers. Value-range
+validation is NOT done here (owned by ``*Config.__post_init__``); the
+walkthrough only does type conversion, re-prompting on a conversion failure.
 """
 from __future__ import annotations
 
@@ -28,32 +30,70 @@ _SCALAR_CONVERT = {
 
 
 # --- thin, patchable read seams --------------------------------------------
+#
+# All interactive input is a plain single-line read in the NORMAL terminal
+# flow. We deliberately avoid prompt_toolkit's dialog/full-screen widgets
+# (radiolist_dialog, confirm): they switch to the alternate screen, which reads
+# as a jarring DOS-style GUI jumping in and out between the inline text prompts.
+# A plain ``input()`` line read keeps every prompt inline, reads piped/non-TTY
+# stdin without cursor-position-request warnings, and is trivial to script in
+# tests. rich is still used (below) for the option descriptions.
+
+
+def _read_line(prompt_text: str) -> str:
+    """Read one line of input, inline. Seam kept tiny so tests patch above it."""
+    return input(prompt_text)
+
 
 def _ask_text(label: str, default_display: str) -> str:
     """Prompt for a line of text. Returns the raw string ('' means accept default)."""
-    from prompt_toolkit import prompt
-
-    return prompt(f"{label} [{default_display}]: ")
+    return _read_line(f"{label} [{default_display}]: ")
 
 
 def _ask_choice(label: str, choices: "tuple[str, ...]", default: str) -> str:
-    """Arrow-select among ``choices`` with ``default`` pre-highlighted."""
-    from prompt_toolkit.shortcuts import radiolist_dialog
+    """Inline numbered pick among ``choices``; empty input accepts ``default``.
 
-    result = radiolist_dialog(
-        title=label,
-        text="Use arrow keys, Enter to confirm.",
-        values=[(c, c) for c in choices],
-        default=default,
-    ).run()
-    return default if result is None else result
+    Rendered in the normal terminal flow (no alternate-screen dialog): the
+    choices are listed with 1-based numbers, the default marked, and a single
+    line is read. Empty input keeps the default; an out-of-range or non-numeric
+    entry re-prompts.
+    """
+    options = list(choices)
+    default_index = options.index(default) + 1 if default in options else 1
+    lines = []
+    for i, choice in enumerate(options, start=1):
+        marker = " (default)" if choice == default else ""
+        lines.append(f"  {i}) {choice}{marker}")
+    menu = "\n".join(lines)
+    while True:
+        raw = _read_line(
+            f"{label}:\n{menu}\nchoose [1-{len(options)}, "
+            f"default {default_index}]: "
+        ).strip()
+        if raw == "":
+            return default
+        try:
+            idx = int(raw)
+        except ValueError:
+            print(f"  invalid choice: {raw!r}")
+            continue
+        if 1 <= idx <= len(options):
+            return options[idx - 1]
+        print(f"  choice out of range: {idx}")
 
 
 def _ask_bool(label: str, default: bool) -> bool:
-    """Yes/no prompt reflecting ``default``."""
-    from prompt_toolkit.shortcuts import confirm
-
-    return bool(confirm(label))
+    """Inline yes/no prompt reflecting ``default``; empty input keeps it."""
+    suffix = "Y/n" if default else "y/N"
+    while True:
+        raw = _read_line(f"{label}? [{suffix}]: ").strip().lower()
+        if raw == "":
+            return default
+        if raw in ("y", "yes"):
+            return True
+        if raw in ("n", "no"):
+            return False
+        print(f"  please answer y or n (got {raw!r})")
 
 
 # --- rich helpers ----------------------------------------------------------
@@ -82,22 +122,36 @@ def _describe(console, spec: OptionSpec, default_display: str) -> None:
 # --- public API ------------------------------------------------------------
 
 def select_item(specs: "list[GeneratorSpec]") -> str:
-    """Arrow-select menu over ``specs``; returns the chosen generator name."""
-    from prompt_toolkit.shortcuts import radiolist_dialog
+    """Inline numbered menu over ``specs``; returns the chosen generator name.
 
+    Rendered in the normal terminal flow (no alternate-screen dialog). Empty
+    input accepts the first item; a non-numeric or out-of-range entry
+    re-prompts.
+    """
     console = _console()
     from rich.panel import Panel
 
-    console.print(Panel.fit("Pick an item to generate (\u2191/\u2193, Enter)"))
+    console.print(Panel.fit("Pick an item to generate"))
 
     names = [spec.name for spec in specs]
-    result = radiolist_dialog(
-        title="bingrid",
-        text="Pick an item to generate.",
-        values=[(spec.name, f"{spec.name} \u2014 {spec.help}") for spec in specs],
-        default=names[0] if names else None,
-    ).run()
-    return names[0] if result is None else result
+    for i, spec in enumerate(specs, start=1):
+        console.print(f"  {i}) {spec.name} \u2014 {spec.help}")
+
+    if not names:
+        raise ValueError("no items registered")
+
+    while True:
+        raw = _read_line(f"choose [1-{len(names)}, default 1]: ").strip()
+        if raw == "":
+            return names[0]
+        try:
+            idx = int(raw)
+        except ValueError:
+            console.print(f"  invalid choice: {raw!r}")
+            continue
+        if 1 <= idx <= len(names):
+            return names[idx - 1]
+        console.print(f"  choice out of range: {idx}")
 
 
 def walk_options(spec: GeneratorSpec) -> Namespace:

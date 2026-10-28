@@ -128,27 +128,60 @@ def test_select_item_returns_choice(monkeypatch):
     import bingrid.cli.generators  # noqa: F401
     from bingrid.cli.registry import REGISTRY
 
-    seen = {}
+    printed = []
 
-    def fake_radiolist_dialog(**kwargs):
-        seen["values"] = kwargs["values"]
+    # The inline menu lists each item via the console, then reads one line.
+    # "bin" is the 2nd registered item; type its number.
+    bin_index = REGISTRY.names().index("bin") + 1
 
-        class _R:
-            def run(self_inner):
-                return "bin"
+    class _RecordingConsole:
+        def print(self, *a, **k):
+            printed.extend(str(x) for x in a)
 
-        return _R()
-
-    monkeypatch.setattr(
-        "prompt_toolkit.shortcuts.radiolist_dialog", fake_radiolist_dialog
-    )
-    # Silence rich panel output.
-    monkeypatch.setattr(prompter, "_console", lambda: _NullConsole())
+    monkeypatch.setattr(prompter, "_console", lambda: _RecordingConsole())
+    monkeypatch.setattr(prompter, "_read_line", lambda *a, **k: str(bin_index))
 
     name = prompter.select_item(REGISTRY.specs())
     assert name == "bin"
-    listed = [v[0] for v in seen["values"]]
-    assert listed == REGISTRY.names()
+    # Every registered item name is listed in the inline menu.
+    for item in REGISTRY.names():
+        assert any(item in line for line in printed)
+
+
+def test_select_item_empty_accepts_first(monkeypatch):
+    import bingrid.cli.generators  # noqa: F401
+    from bingrid.cli.registry import REGISTRY
+
+    monkeypatch.setattr(prompter, "_console", lambda: _NullConsole())
+    monkeypatch.setattr(prompter, "_read_line", lambda *a, **k: "")
+
+    name = prompter.select_item(REGISTRY.specs())
+    assert name == REGISTRY.names()[0]
+
+
+def test_ask_choice_numbered_selection(monkeypatch):
+    monkeypatch.setattr(prompter, "_read_line", lambda *a, **k: "2")
+    assert prompter._ask_choice("style", ("socket", "taper"), "socket") == "taper"
+
+
+def test_ask_choice_empty_keeps_default(monkeypatch):
+    monkeypatch.setattr(prompter, "_read_line", lambda *a, **k: "")
+    assert prompter._ask_choice("style", ("socket", "taper"), "socket") == "socket"
+
+
+def test_ask_choice_reprompts_on_bad_input(monkeypatch):
+    answers = iter(["9", "x", "1"])
+    monkeypatch.setattr(prompter, "_read_line", lambda *a, **k: next(answers))
+    assert prompter._ask_choice("style", ("socket", "taper"), "taper") == "socket"
+
+
+def test_ask_bool_yes_no_and_default(monkeypatch):
+    monkeypatch.setattr(prompter, "_read_line", lambda *a, **k: "y")
+    assert prompter._ask_bool("magnets", False) is True
+    monkeypatch.setattr(prompter, "_read_line", lambda *a, **k: "n")
+    assert prompter._ask_bool("magnets", True) is False
+    monkeypatch.setattr(prompter, "_read_line", lambda *a, **k: "")
+    assert prompter._ask_bool("magnets", True) is True
 
 
 class _NullConsole:
