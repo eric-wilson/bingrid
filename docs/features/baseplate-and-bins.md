@@ -14,8 +14,8 @@ volume/bbox regression guard pins the plate socket (baseline socket volume
 
 The profile is a **measured carbon-copy** of the reference Gridfinity part
 (re-measured at fine z-steps). Dataclass profile defaults — now matched exactly
-by both the plate CLI (`python -m bingrid.cli`) and the bin CLI
-(`python -m bingrid.bin`):
+by both the plate CLI (`bingrid grid`) and the bin CLI
+(`bingrid bin`):
 
 - `top_opening = 37.7` (straight-section seat opening),
 - `chamfer_top = 2.1` (mouth flare → `mouth_opening = 37.7 + 2*2.1 = 41.9`,
@@ -31,7 +31,7 @@ generator's geometry code is unchanged; only the shared constants moved.
 
 ## Baseplate / frame
 
-Generator: `GridfinityPlate` (`geometry.py`), CLI `python -m bingrid.cli`.
+Generator: `GridfinityPlate` (`geometry.py`), CLI `bingrid grid`.
 
 - Configurable grid; socket profile matches the published spec.
 - Open floor by default, optional `--floor`.
@@ -59,7 +59,7 @@ Generator: `GridfinityPlate` (`geometry.py`), CLI `python -m bingrid.cli`.
 
 Generator: `GridfinityBin` with a `BinFeature` pipeline (body, foot, hollow
 interior, optional stacking lip). Config: `BinConfig`. CLI:
-`python -m bingrid.bin --x 2 --y 1 --units 6 --stacking-lip`.
+`bingrid bin --x 2 --y 1 --units 6 --stacking-lip`.
 
 Key dimensions (derived from the shared profile, verified against the spec):
 
@@ -139,7 +139,7 @@ lip.
 
 ```bash
 # from src/
-python -m bingrid.bin --x 2 --y 1 --units 5 --stacking-lip --split-lip
+bingrid bin --x 2 --y 1 --units 5 --stacking-lip --split-lip
 # writes ..._body.stl + ..._lip.stl (+ a combined .step for reference)
 ```
 
@@ -168,7 +168,7 @@ pre-separated and color-assignable (no manual combine step) — see
 
 ```bash
 # from src/
-python -m bingrid.bin --x 2 --y 1 --units 5 --stacking-lip --3mf
+bingrid bin --x 2 --y 1 --units 5 --stacking-lip --3mf
 # writes one .3mf with two named bodies ("body" + "lip"), pre-aligned
 ```
 

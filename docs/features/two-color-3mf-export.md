@@ -17,7 +17,7 @@ combine two STLs by hand in the slicer.
 
 ```bash
 # from src/
-python -m bingrid.bin --x 2 --y 1 --units 5 --stacking-lip --3mf
+bingrid bin --x 2 --y 1 --units 5 --stacking-lip --3mf
 # writes one bin_2x1_u5_lip_floor1.0.3mf holding two bodies: "body" + "lip"
 ```
 
@@ -79,7 +79,7 @@ Gridfinity bin has, and it avoids the confusing mid-wall stripe.
 
 ```bash
 # from src/
-python -m bingrid.bin --x 2 --y 1 --units 6 --3mf-paint
+bingrid bin --x 2 --y 1 --units 6 --3mf-paint
 # writes one bin_2x1_u6_lip_floor1.0.3mf: one mesh, the lip on filament 2,
 # the rest (body + foot) on filament 1
 ```
@@ -99,9 +99,9 @@ assigned to the second filament.
 
 ```bash
 # from src/
-python -m bingrid.bin --x 2 --y 1 --units 6 --3mf-paint --color-band
+bingrid bin --x 2 --y 1 --units 6 --3mf-paint --color-band
 # writes one mesh with an auto-centered wall band on filament 2
-python -m bingrid.bin --x 2 --y 1 --units 6 --3mf-paint --color-band \
+bingrid bin --x 2 --y 1 --units 6 --3mf-paint --color-band \
     --color-band-start 15 --color-band-height 6
 # band placed explicitly at part z = 15..21 mm
 ```

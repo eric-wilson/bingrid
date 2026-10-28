@@ -10,3 +10,8 @@ rtree
 mapbox_earcut
 # Needed by trimesh's 3MF writer (used by the bin --3mf two-body export).
 lxml
+# Interactive CLI: rich renders the item menu and per-option descriptions;
+# prompt_toolkit provides the arrow-select menu and validated option input.
+# Both still support the declared Python 3.8 floor.
+rich~=15.0
+prompt_toolkit~=3.0

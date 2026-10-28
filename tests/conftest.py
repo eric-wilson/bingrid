@@ -29,14 +29,21 @@ def geometry_mod():
 
 
 @pytest.fixture(scope="session")
-def cli_mod():
-    import bingrid.cli as m
+def app_mod():
+    import bingrid.cli.app as m
 
     return m
 
 
 @pytest.fixture(scope="session")
-def bin_mod():
-    import bingrid.bin as m
+def registry_mod():
+    import bingrid.cli.registry as m
+
+    return m
+
+
+@pytest.fixture(scope="session")
+def generators_mod():
+    import bingrid.cli.generators as m
 
     return m

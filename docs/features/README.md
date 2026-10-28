@@ -11,8 +11,8 @@ the old session-handoff note.
 
 ## Conventions
 
-- Run CLIs from `src/`: `python -m bingrid.cli ...` (baseplate),
-  `python -m bingrid.bin ...` (bins), `python -m bingrid.meshtools.cli ...`.
+- Run CLIs from `src/`: `bingrid grid ...` (baseplate),
+  `bingrid bin ...` (bins), `python -m bingrid.meshtools.cli ...`.
 - Tests: `pytest` (fast), `pytest -m integration` (builds solids). `src` is on
   pythonpath via `pyproject.toml`; integration tests are deselected by default.
 - Commit style: emoji + type + (scope): short description

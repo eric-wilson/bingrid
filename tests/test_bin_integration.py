@@ -788,13 +788,13 @@ def test_export_3mf_has_two_aligned_watertight_bodies(gridfinity, tmp_path):
     assert lip_mesh.extents[1] == pytest.approx(cfg.length, abs=0.2)
 
 
-def test_cli_3mf_with_lip_writes_a_3mf(gridfinity, bin_mod, tmp_path):
+def test_cli_3mf_with_lip_writes_a_3mf(gridfinity, app_mod, tmp_path):
     _require_3mf_writer()
     import trimesh
 
-    rc = bin_mod.main(
-        ["--x", "2", "--y", "1", "--units", "5", "--stacking-lip", "--3mf",
-         "--output-dir", str(tmp_path)]
+    rc = app_mod.main(
+        ["bin", "--x", "2", "--y", "1", "--units", "5", "--stacking-lip",
+         "--3mf", "--output-dir", str(tmp_path)]
     )
     assert rc == 0
     threemfs = sorted(tmp_path.glob("*.3mf"))
@@ -803,9 +803,9 @@ def test_cli_3mf_with_lip_writes_a_3mf(gridfinity, bin_mod, tmp_path):
     assert set(scene.geometry.keys()) == {"body", "lip"}
 
 
-def test_cli_3mf_without_lip_exits_2(bin_mod, tmp_path, capsys):
-    rc = bin_mod.main(
-        ["--3mf", "--no-stacking-lip", "--output-dir", str(tmp_path)]
+def test_cli_3mf_without_lip_exits_2(app_mod, tmp_path, capsys):
+    rc = app_mod.main(
+        ["bin", "--3mf", "--no-stacking-lip", "--output-dir", str(tmp_path)]
     )
     assert rc == 2
     assert "error:" in capsys.readouterr().out
@@ -1105,20 +1105,33 @@ def test_painted_faces_fall_within_explicit_band(gridfinity, tmp_path):
             assert all(b0 - eps <= z <= b1 + eps for z in zs)
 
 
-def test_cli_3mf_paint_no_lip_exits_2(bin_mod, tmp_path, capsys):
+def test_cli_3mf_paint_no_lip_exits_2(app_mod, tmp_path, capsys):
     """--3mf-paint (lip mode) with --no-stacking-lip errors with exit 2."""
-    rc = bin_mod.main(
-        ["--3mf-paint", "--no-stacking-lip", "--output-dir", str(tmp_path)]
+    rc = app_mod.main(
+        ["bin", "--3mf-paint", "--no-stacking-lip", "--output-dir",
+         str(tmp_path)]
     )
     assert rc == 2
     assert "error:" in capsys.readouterr().out
     assert not list(tmp_path.glob("*.3mf"))
 
 
-def test_cli_3mf_paint_band_mode_no_lip_is_ok(gridfinity, bin_mod, tmp_path):
+def test_cli_3mf_paint_band_mode_no_lip_is_ok(gridfinity, app_mod, tmp_path):
     """--3mf-paint --color-band paints the wall and needs no lip (exit 0)."""
-    rc = bin_mod.main(
-        ["--3mf-paint", "--color-band", "--no-stacking-lip", "--units", "6",
+    rc = app_mod.main(
+        ["bin", "--3mf-paint", "--color-band", "--no-stacking-lip", "--units",
+         "6", "--output-dir", str(tmp_path)]
+    )
+    assert rc == 0
+    threemfs = sorted(tmp_path.glob("*.3mf"))
+    assert len(threemfs) == 1
+    _verts, tris = _parse_painted_model(threemfs[0])
+    assert any(t[3] == "8" for t in tris)
+
+
+def test_cli_3mf_paint_writes_painted_3mf(gridfinity, app_mod, tmp_path):
+    rc = app_mod.main(
+        ["bin", "--x", "2", "--y", "1", "--units", "6", "--3mf-paint",
          "--output-dir", str(tmp_path)]
     )
     assert rc == 0
@@ -1128,32 +1141,20 @@ def test_cli_3mf_paint_band_mode_no_lip_is_ok(gridfinity, bin_mod, tmp_path):
     assert any(t[3] == "8" for t in tris)
 
 
-def test_cli_3mf_paint_writes_painted_3mf(gridfinity, bin_mod, tmp_path):
-    rc = bin_mod.main(
-        ["--x", "2", "--y", "1", "--units", "6", "--3mf-paint",
-         "--output-dir", str(tmp_path)]
-    )
-    assert rc == 0
-    threemfs = sorted(tmp_path.glob("*.3mf"))
-    assert len(threemfs) == 1
-    _verts, tris = _parse_painted_model(threemfs[0])
-    assert any(t[3] == "8" for t in tris)
-
-
-def test_cli_3mf_paint_band_outside_wall_exits_2(bin_mod, tmp_path, capsys):
-    rc = bin_mod.main(
-        ["--units", "3", "--3mf-paint", "--color-band", "--color-band-start",
-         "500", "--output-dir", str(tmp_path)]
+def test_cli_3mf_paint_band_outside_wall_exits_2(app_mod, tmp_path, capsys):
+    rc = app_mod.main(
+        ["bin", "--units", "3", "--3mf-paint", "--color-band",
+         "--color-band-start", "500", "--output-dir", str(tmp_path)]
     )
     assert rc == 2
     assert "error:" in capsys.readouterr().out
     assert not list(tmp_path.glob("*.3mf"))
 
 
-def test_cli_3mf_paint_height_zero_exits_2(bin_mod, tmp_path, capsys):
-    rc = bin_mod.main(
-        ["--units", "6", "--3mf-paint", "--color-band", "--color-band-height",
-         "0", "--output-dir", str(tmp_path)]
+def test_cli_3mf_paint_height_zero_exits_2(app_mod, tmp_path, capsys):
+    rc = app_mod.main(
+        ["bin", "--units", "6", "--3mf-paint", "--color-band",
+         "--color-band-height", "0", "--output-dir", str(tmp_path)]
     )
     assert rc == 2
     assert "error:" in capsys.readouterr().out

@@ -4,6 +4,19 @@ version = "0.1.0"
 description = ""
 authors = [{name="Eric Wilson", email="eric.wilson@geekcafe.com"}]
 requires-python = ">=3.8"
+dependencies = [
+    "cadquery",
+    "trimesh",
+    "shapely",
+    "networkx",
+    "rtree",
+    "mapbox_earcut",
+    "lxml",
+    "rich~=15.0",
+    "prompt_toolkit~=3.0",
+]
+[project.scripts]
+bingrid = "bingrid.cli.app:main"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests", "src"]

@@ -45,40 +45,41 @@ Dependencies: `cadquery` (modeling), plus `trimesh`, `shapely`, and `networkx`
 
 ## Usage
 
-The generator is driven by a CLI. Run it as a module from the `src` directory
-(or with `src` on `PYTHONPATH`):
+The generator is driven by a single `bingrid` CLI that dispatches to generators
+by name (`bingrid grid ...`, `bingrid bin ...`). Install the package
+(`pip install -e .`) to get the `bingrid` console script, or run it as a module
+with `python -m bingrid ...`:
 
 ```bash
-cd src
-python -m bingrid.cli --help
+bingrid grid --help
 ```
 
 ### Examples
 
 ```bash
 # Default 2x2 frame: Gridfinity socket profile, open floor, magnets
-python -m bingrid.cli
+bingrid grid
 
 # A 3x3 frame matching the standard baseplate footprint (126 x 126 x 5 mm)
-python -m bingrid.cli --x 3 --y 3 --no-magnets --height 5
+bingrid grid --x 3 --y 3 --no-magnets --height 5
 
 # Add a 1.2 mm solid floor
-python -m bingrid.cli --floor 1.2
+bingrid grid --floor 1.2
 
 # Legacy simple taper instead of the socket profile
-python -m bingrid.cli --style taper --taper-angle 2
+bingrid grid --style taper --taper-angle 2
 
 # Larger magnets and a thicker wall
-python -m bingrid.cli --magnet-diameter 6 --magnet-depth 2 --wall 6
+bingrid grid --magnet-diameter 6 --magnet-depth 2 --wall 6
 
 # Tileable frames with dovetail connectors
-python -m bingrid.cli --x 2 --y 2 --connectors
+bingrid grid --x 2 --y 2 --connectors
 
 # Vertical (bottom-face) magnets instead of edge magnets (needs a floor)
-python -m bingrid.cli --magnet-orientation vertical --floor 2
+bingrid grid --magnet-orientation vertical --floor 2
 
 # Plain round horizontal pockets instead of teardrop
-python -m bingrid.cli --magnet-shape round
+bingrid grid --magnet-shape round
 ```
 
 Output is written to `.output/` by default (override with `--output-dir`), with
