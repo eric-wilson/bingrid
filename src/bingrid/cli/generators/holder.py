@@ -462,6 +462,26 @@ def build_config(args: Namespace) -> HolderConfig:
     return _make_holder(bin_cfg, args)
 
 
+def lip_paint_guards(args: Namespace) -> "str | None":
+    """The lip/paint prechecks shared by the holder and battery generators.
+
+    Ported bin lip/paint guards (verbatim intent): --split-lip and --3mf each
+    need the stacking lip, and --3mf-paint needs a lip unless --color-band moves
+    the paint to a mid-wall band. Returns an error string (dispatcher maps it to
+    exit 2) or ``None`` when clean.
+    """
+    if args.split_lip and not args.stacking_lip:
+        return "--split-lip requires the stacking lip"
+    if args.three_mf and not args.stacking_lip:
+        return "--3mf requires the stacking lip"
+    if args.three_mf_paint and not args.color_band and not args.stacking_lip:
+        return (
+            "--3mf-paint paints the stacking lip; use --color-band to "
+            "paint a mid-wall band without a lip"
+        )
+    return None
+
+
 def precheck(args: Namespace) -> "str | None":
     # Exactly one valid item-size set for the shape (mirrors the config guard,
     # but reported as an error string -> the dispatcher maps it to exit 2).
@@ -476,31 +496,30 @@ def precheck(args: Namespace) -> "str | None":
         if args.item_w is not None or args.item_d is not None:
             return "round pockets take --item-dia, not --item-w/--item-d"
 
-    # Ported bin lip/paint guards (verbatim intent).
-    if args.split_lip and not args.stacking_lip:
-        return "--split-lip requires the stacking lip"
-    if args.three_mf and not args.stacking_lip:
-        return "--3mf requires the stacking lip"
-    if args.three_mf_paint and not args.color_band and not args.stacking_lip:
-        return (
-            "--3mf-paint paints the stacking lip; use --color-band to "
-            "paint a mid-wall band without a lip"
-        )
-    return None
+    return lip_paint_guards(args)
 
 
-def build_and_export(
-    config: HolderConfig, args: Namespace, exporter: ModelExporter
+def build_and_export_named(
+    config: HolderConfig, args: Namespace, exporter: ModelExporter, name: str
 ) -> "list[Path]":
-    # The holder is a bin whose interior is carved into pockets. It keeps a
-    # SOLID interior (the pockets ARE the hollowing -- the locked subtractive
-    # decision): the body/foot are built, then PocketGridFeature cuts the R x C
-    # pocket array from the solid, leaving ribs between pockets, and the lip is
-    # added. The plain HollowInteriorFeature is deliberately NOT in the pipeline
-    # (a full cavity cut would leave nothing for the pockets to carve). The
-    # cavity-bottom clamp is reused inside PocketGridFeature so a pocket never
-    # breaches the foot/floor. GridfinityBin is driven by the inner BinConfig;
-    # the pocket feature carries the holder config it needs.
+    """Build the holder solid and export it under the resolved ``name``.
+
+    The holder is a bin whose interior is carved into pockets. It keeps a
+    SOLID interior (the pockets ARE the hollowing -- the locked subtractive
+    decision): the body/foot are built, then PocketGridFeature cuts the R x C
+    pocket array from the solid, leaving ribs between pockets, and the lip is
+    added. The plain HollowInteriorFeature is deliberately NOT in the pipeline
+    (a full cavity cut would leave nothing for the pockets to carve). The
+    cavity-bottom clamp is reused inside PocketGridFeature so a pocket never
+    breaches the foot/floor. GridfinityBin is driven by the inner BinConfig;
+    the pocket feature carries the holder config it needs.
+
+    The export branches (split STLs / two-body .3mf / painted .3mf / plain
+    STL+STEP) are the SAME as a bin's, so ``export_split`` / ``export_3mf`` /
+    ``export_3mf_painted`` operate on ``config.bin``. Factored out so the
+    ``battery`` generator reuses the identical pipeline with its own
+    battery-tagged ``name``.
+    """
     bin_ = GridfinityBin(
         config.bin,
         features=[
@@ -511,10 +530,6 @@ def build_and_export(
         ],
     )
 
-    name = args.name or exporter.holder_default_name(config)
-    # Reuse the bin's split/3mf/paint branches VERBATIM: the holder body/lip
-    # split is the same shape as a bin's, so export_split / export_3mf operate
-    # on config.bin.
     paths = []
     if args.split_lip or args.three_mf:
         body, lip = bin_.build_split()
@@ -529,6 +544,13 @@ def build_and_export(
         model = bin_.build()
         paths = exporter.export(model, config.bin, name=name)
     return paths
+
+
+def build_and_export(
+    config: HolderConfig, args: Namespace, exporter: ModelExporter
+) -> "list[Path]":
+    name = args.name or exporter.holder_default_name(config)
+    return build_and_export_named(config, args, exporter, name)
 
 
 def summary(config: HolderConfig, paths: "list[Path]") -> str:

@@ -102,6 +102,19 @@ class ModelExporter:
             name += f"_{_trim(config.item_w)}x{_trim(config.item_d)}"
         return name
 
+    def battery_default_name(self, config: HolderConfig, type_name: str) -> str:
+        """Battery-tagged holder name: ``battery_<TYPE>_<holder-tail>``.
+
+        Reuses :meth:`holder_default_name` and swaps its leading ``holder_``
+        tag for ``battery_<TYPE>_`` so a preset-built holder names itself after
+        the battery it was loaded with. e.g. a holder whose name is
+        ``holder_1x1_2x2_round_u8_dia14.5`` with type ``AA`` becomes
+        ``battery_AA_1x1_2x2_round_u8_dia14.5``.
+        """
+        tail = self.holder_default_name(config)
+        tail = tail[len("holder_"):]  # strip the leading 'holder_' tag
+        return f"battery_{type_name}_{tail}"
+
     def export(
         self,
         model: cq.Workplane,

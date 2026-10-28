@@ -10,11 +10,11 @@ from bingrid.cli.schema import (
 )
 
 
-def test_import_generators_registers_grid_then_bin_then_holder():
+def test_import_generators_registers_grid_bin_holder_battery():
     import bingrid.cli.generators  # noqa: F401
     from bingrid.cli.registry import REGISTRY
 
-    assert REGISTRY.names() == ["grid", "bin", "holder"]
+    assert REGISTRY.names() == ["grid", "bin", "holder", "battery"]
 
 
 def test_reregistering_a_name_raises():
