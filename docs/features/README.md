@@ -7,7 +7,7 @@ the old session-handoff note.
 | --- | --- | --- |
 | Gridfinity baseplate / frame | ✅ shipped | [baseplate-and-bins.md](baseplate-and-bins.md) |
 | Gridfinity bins (foot, hollow body, stacking lip, split-lip export) | ✅ shipped | [baseplate-and-bins.md](baseplate-and-bins.md) |
-| Snug-fit holder bins (item-shaped cradles) | 📋 planned | [snug-fit-holder-bins.md](snug-fit-holder-bins.md) |
+| Generic pocket holders (measure any item → pocket grid; batteries, tins, tools, containers) | 📝 design | [snug-fit-holder-bins.md](snug-fit-holder-bins.md) |
 
 ## Conventions
 
