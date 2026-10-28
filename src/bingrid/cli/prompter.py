@@ -31,13 +31,14 @@ _SCALAR_CONVERT = {
 
 # --- thin, patchable read seams --------------------------------------------
 #
-# All interactive input is a plain single-line read in the NORMAL terminal
-# flow. We deliberately avoid prompt_toolkit's dialog/full-screen widgets
-# (radiolist_dialog, confirm): they switch to the alternate screen, which reads
-# as a jarring DOS-style GUI jumping in and out between the inline text prompts.
-# A plain ``input()`` line read keeps every prompt inline, reads piped/non-TTY
-# stdin without cursor-position-request warnings, and is trivial to script in
-# tests. rich is still used (below) for the option descriptions.
+# All interactive input is a plain single-line ``input()`` read in the NORMAL
+# terminal flow. An earlier version used prompt_toolkit's dialog/full-screen
+# widgets (radiolist_dialog, confirm); they switch to the alternate screen,
+# which read as a jarring DOS-style GUI jumping in and out between the inline
+# text prompts, so that dependency was dropped. A plain line read keeps every
+# prompt inline, reads piped/non-TTY stdin without cursor-position-request
+# warnings, and is trivial to script in tests. rich (below) renders the option
+# descriptions, menu, and choice lists.
 
 
 def _read_line(prompt_text: str) -> str:
@@ -164,8 +165,6 @@ def _bool_help(opt: OptionSpec) -> str:
     so it matches the positive question. PAIR/POSITIVE_ON help already reads
     positively.
     """
-    from .schema import BoolStyle
-
     if opt.prompt_help:
         return opt.prompt_help
     if opt.bool_style is BoolStyle.NEGATIVE_OFF:

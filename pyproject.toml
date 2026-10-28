@@ -13,7 +13,6 @@ dependencies = [
     "mapbox_earcut",
     "lxml",
     "rich~=15.0",
-    "prompt_toolkit~=3.0",
 ]
 [project.scripts]
 bingrid = "bingrid.cli.app:main"
