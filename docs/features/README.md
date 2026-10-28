@@ -7,7 +7,8 @@ the old session-handoff note.
 | --- | --- | --- |
 | Gridfinity baseplate / frame | ✅ shipped | [baseplate-and-bins.md](baseplate-and-bins.md) |
 | Gridfinity bins (foot, hollow body, stacking lip, split-lip export) | ✅ shipped | [baseplate-and-bins.md](baseplate-and-bins.md) |
-| Generic pocket holders (measure any item → pocket grid; batteries, tins, tools, containers) | 📝 design | [snug-fit-holder-bins.md](snug-fit-holder-bins.md) |
+| Generic pocket holders (measure any item → pocket grid; batteries, tins, tools, containers) | ✅ shipped | [snug-fit-holder-bins.md](snug-fit-holder-bins.md) |
+| Battery presets (curated front-end over holder; AA/AAA/C/D/9V/CR2032/CR2025/CR2016/18650) | ✅ shipped | [snug-fit-holder-bins.md](snug-fit-holder-bins.md) |
 
 ## Conventions
 

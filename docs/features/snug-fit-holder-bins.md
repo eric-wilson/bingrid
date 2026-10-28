@@ -1,6 +1,6 @@
 # Snug-fit holder bins — design
 
-**Status:** 📝 design (fleshed out, not yet built).
+**Status:** ✅ shipped (holder generator + battery presets front-end).
 
 ## Idea
 
@@ -73,8 +73,6 @@ not separate features; they are the same generator with different numbers
 
 **Out of scope (v1), possible follow-ups:**
 
-- **Item presets** (`--item AA`, `--item 9V`, `--item 18650`) — a small named
-  library mapping to dims + shape. Nice ergonomics, but raw dims are the MVP.
 - **Cavity-from-mesh** — deriving a pocket from a supplied item STL (offset
   hull / voxel subtraction). Heavier; the parametric pocket covers the battery
   use case without it.
@@ -202,6 +200,67 @@ bingrid holder --rows 1 --cols 1 \
 # bin that holds the item, or give an --x/--y large enough (e.g. `--x 2 --y 1`).
 ```
 
+## Battery presets
+
+**Status:** ✅ shipped. The `battery` generator is a curated front-end over
+`holder`: it factory-loads a chosen known battery type's dimensions into a
+`HolderConfig` and reuses holder's resolution, export, and summary helpers. You
+never type raw item dimensions for a known cell — you pick a type.
+
+### Known types
+
+| Type | Pocket shape | Nominal dims (mm) | Height (mm) |
+|------|--------------|-------------------|-------------|
+| AA | round | ⌀ 14.5 | 50.5 |
+| AAA | round | ⌀ 10.5 | 44.5 |
+| C | round | ⌀ 26.2 | 50.0 |
+| D | round | ⌀ 34.2 | 61.5 |
+| 9V | rect | 26.5 × 17.5 | 48.5 |
+| CR2032 | round | ⌀ 20.0 | 3.2 |
+| CR2025 | round | ⌀ 20.0 | 2.5 |
+| CR2016 | round | ⌀ 20.0 | 1.6 |
+| 18650 | round | ⌀ 18.6 | 65.2 |
+
+### UX (`bingrid battery`)
+
+- `bingrid battery --help` lists the known types with their dimensions and notes
+  that custom items go through `bingrid holder`.
+- Interactive `bingrid battery` (no args) presents a **numbered type menu** — the
+  `--type` option renders as a CHOICE menu in the prompter.
+- `--type <TYPE>` picks the preset directly (default `AA`).
+- **Full-height auto-fit by default:** the bin height (units) is sized from the
+  battery's height plus the proud clamp. Use `--units N` to cap the height for
+  faster prints and less waste (overrides the auto-fit).
+- Every holder pass-through flag behaves identically (`--fit`/`--fit-clearance`,
+  `--pocket-wall`, `--pocket-corner-radius`, `--x`/`--y`/`--count`/`--rows`/
+  `--cols`, `--proud`, `--center-grid`/`--pack`, and all inherited bin options —
+  `--pitch`/`--wall`/`--floor`/`--stacking-lip`/`--lip-*`/`--split-lip`/`--3mf`/
+  `--3mf-paint`/`--color-band*`/`--output-dir`/`--name`). `--pocket-shape` is
+  accepted but overridden by the preset, so its value is irrelevant.
+
+### Coin-cell proud clamp
+
+The default `--proud` is 6.0 mm, which would drive the pocket depth non-positive
+for the thin coin cells (CR2032/CR2025/CR2016 are ≤ 3.2 mm tall). To let those
+build with no flags, the battery build **clamps** `--proud` so that at least
+`MIN_POCKET_DEPTH` (~2.5 mm) of pocket remains:
+`proud = min(proud, max(height − 2.5, 0))`. This clamp lives in the battery
+build only — it does **not** change `HolderConfig` validation, which still
+rejects a non-positive pocket depth for the raw `holder` path.
+
+### Custom items
+
+`battery` has no `--type custom` path and no raw item-dimension flags
+(`--item-w`/`--item-d`/`--item-dia`/`--item-height` were removed). For anything
+that isn't a known cell, use `bingrid holder` with the raw item dimensions.
+
+### Output names
+
+Battery files are named `battery_<TYPE>_<holder-tail>`, where the tail is the
+holder default name with the leading `holder_` stripped — e.g. an AA holder is
+`battery_AA_1x1_2x2_round_u7_dia14.5` and a 9V holder is
+`battery_9V_1x1_2x1_rect_u7_26.5x17.5`.
+
 ## Implementation plan
 
 Follows the existing SOLID/DRY shape — a new config, a new interior `BinFeature`,
@@ -237,8 +296,9 @@ a new generator spec. No change to the plate or to the bin's foot/footprint math
    item dims: `holder_{x}x{y}_{rows}x{cols}_{shape}_u{units}_{dims}`. v1 ships
    raw dims (not a named item preset), so a 9V rect holder is
    `holder_1x1_2x1_rect_u6_26.5x17.5.stl` and an AA round holder is
-   `holder_1x1_2x2_round_u6_dia14.5.stl`. (A named `9v`/`AA` item tag is the
-   deferred item-preset follow-up, not v1.)
+   `holder_1x1_2x2_round_u6_dia14.5.stl`. (The named `battery` generator shipped
+   as a follow-up and tags its output `battery_<TYPE>_…`; see
+   [Battery presets](#battery-presets).)
 
 5. **meshtools** stays the backing measurement tool — handy for a user to
    measure a reference item mesh when they don't have calipers, and for tests.
@@ -289,5 +349,10 @@ No sample files; measure our own generated meshes against computed expectations.
 3. **Finger access** — optional scoop/cutaway on a pocket wall for deep pockets
    (`--finger-scoop`). The `--proud` stand-up height covers the common case for
    now.
-4. **Item presets** — a named library (`--item 9V`, `--item AA`, `--item 18650`)
-   mapping to dims + shape. v1 ships raw dims only.
+
+### Shipped follow-ups
+
+- **Item presets** — a named library mapping to dims + shape. Shipped as the
+  `battery` generator (`bingrid battery --type 9V|AA|18650|…`), a curated
+  front-end over `holder`. See the [Battery presets](#battery-presets) section
+  above.
