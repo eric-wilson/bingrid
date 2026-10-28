@@ -2,7 +2,7 @@
 
 Public API:
     GridConfig, MagnetConfig, TaperConfig, GridfinityProfile, ConnectorConfig,
-    BinConfig
+    BinConfig, HolderConfig
         -- validated parameter/value objects
     GridfinityPlate  -- builds the baseplate/frame CadQuery solid
     GridfinityBin    -- builds a hollow open-top bin that plugs into a plate
@@ -11,10 +11,12 @@ Public API:
 The general-purpose mesh inspection utilities live in ``bingrid.meshtools``.
 """
 from .config import (
+    FIT_PRESETS,
     BinConfig,
     ConnectorConfig,
     GridConfig,
     GridfinityProfile,
+    HolderConfig,
     MagnetConfig,
     Plane,
     TaperConfig,
@@ -30,6 +32,7 @@ from .geometry import (
     HollowInteriorFeature,
     MagnetPocketFeature,
     PlateFeature,
+    PocketGridFeature,
     StackingLipFeature,
 )
 from .exporter import ModelExporter
@@ -41,6 +44,8 @@ __all__ = [
     "GridfinityProfile",
     "ConnectorConfig",
     "BinConfig",
+    "HolderConfig",
+    "FIT_PRESETS",
     "Plane",
     "GridfinityPlate",
     "GridfinityBin",
@@ -53,5 +58,6 @@ __all__ = [
     "BinBodyFeature",
     "BinFootFeature",
     "HollowInteriorFeature",
+    "PocketGridFeature",
     "StackingLipFeature",
 ]

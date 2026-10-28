@@ -841,3 +841,301 @@ class BinConfig:
         foot side walls (which would leave a non-manifold base).
         """
         return self.base_height + self.floor
+
+
+# Fit presets: a measured per-side pocket clearance (mm) for each named fit,
+# mirroring the subjective "snug with tolerance" language of the design doc.
+# ``snug`` holds the item firmly, ``normal`` (the default) drops in and is easy
+# to grab, ``loose`` is very forgiving. ``HolderConfig.resolved_clearance``
+# reads this (or an explicit override), the same way ``resolved_lip_wall``
+# resolves the lip rim wall.
+FIT_PRESETS = {"snug": 0.25, "normal": 0.40, "loose": 0.60}
+
+
+@dataclass(frozen=True)
+class HolderConfig:
+    """A generic pocket-holder bin: a bin whose interior is a pocket grid.
+
+    The holder is a normal :class:`BinConfig` bin (same footprint, foot, floor,
+    and optional stacking lip) whose hollow interior is carved into an R x C
+    array of identical pockets, each sized to one measured item plus a per-side
+    fit clearance. "Hold the items directly" (many pockets) and "hold another
+    container" (one big loose pocket, R=C=1) are the same engine at different
+    pocket counts.
+
+    Composition over inheritance: the holder HOLDS a validated ``bin``
+    :class:`BinConfig` (a complete value object whose own tests must stay green)
+    and adds the pocket fields. The handful of bin properties the geometry and
+    exporter read are re-exposed here by delegating to ``self.bin``, so callers
+    get one validated object.
+
+    The pocket model (the crux -- snug WITH tolerance):
+
+    * **Nominal item size** is what the user measures (outer ``item_w`` x
+      ``item_d`` for ``rect``; ``item_dia`` for ``round``).
+    * **Pocket size = nominal + 2 x clearance** (clearance per side), resolved
+      from the ``fit`` preset or an explicit ``fit_clearance`` override.
+    * **Pocket corner radius** rounds a rectangular pocket's internal corners
+      so a boxy item is not fighting a sharp corner and the pocket prints clean.
+    * **Round pockets** are a plain vertical cylinder cut (prints round, no
+      teardrop needed -- the cavity opens upward).
+
+    Layout (the single source of truth, pure arithmetic -- NO CadQuery):
+    the interior opening per axis is the bin's inner opening; given a pocket
+    footprint and an inter-pocket ``pocket_wall``::
+
+        cols = floor((interior_w + pocket_wall) / (pocket_w + pocket_wall))
+        rows = floor((interior_l + pocket_wall) / (pocket_d + pocket_wall))
+
+    Explicit ``rows`` / ``cols`` override the derived counts (the fit-count
+    driver). Leftover margin (what does not divide evenly) is, by default, split
+    symmetrically when ``center_grid`` is on; ``--pack`` pushes the block to a
+    corner so the leftover is one contiguous open strip.
+
+    Depth never breaches the floor: a pocket's floor is clamped to
+    ``cavity_bottom = base_height + floor`` -- the same rule the hollow body
+    already uses.
+    """
+
+    bin: BinConfig = BinConfig()
+    pocket_shape: str = "rect"           # 'rect' or 'round'
+    item_w: float | None = None          # rect item width, mm
+    item_d: float | None = None          # rect item depth, mm
+    item_dia: float | None = None        # round item diameter, mm
+    item_height: float | None = None     # item height, mm (with proud -> depth)
+    fit: str = "normal"                  # 'snug' / 'normal' / 'loose' preset
+    fit_clearance: float | None = None   # explicit per-side clearance, mm
+    pocket_wall: float = 1.2             # rib thickness between pockets, mm
+    pocket_corner_radius: float = 1.0    # rect pocket internal corner radius, mm
+    pocket_depth: float | None = None    # explicit cavity depth, mm
+    proud: float = 6.0                   # mm the item stands above the wall
+    center_grid: bool = True             # center the grid; False = corner-pack
+    # Explicit layout drivers (fit-count). ``rows`` / ``cols`` override the
+    # derived counts; ``count`` is resolved by the generator into a bin size and
+    # is recorded here for the summary.
+    count: int | None = None
+    rows: int | None = None
+    cols: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.pocket_shape not in ("rect", "round"):
+            raise ValueError("pocket_shape must be 'rect' or 'round'")
+        if self.fit not in FIT_PRESETS:
+            raise ValueError("fit must be 'snug', 'normal' or 'loose'")
+        # Exactly one item-size set for the shape: rect needs w AND d and must
+        # NOT be given a diameter; round needs a diameter and must NOT be given
+        # w/d. (The CLI precheck guards this too; validating here keeps the
+        # config a self-contained value object.)
+        if self.pocket_shape == "rect":
+            if self.item_w is None or self.item_d is None:
+                raise ValueError(
+                    "rect pockets need item_w and item_d (give item_dia for round)"
+                )
+            if self.item_dia is not None:
+                raise ValueError(
+                    "rect pockets take item_w+item_d, not item_dia"
+                )
+        else:  # round
+            if self.item_dia is None:
+                raise ValueError(
+                    "round pockets need item_dia (give item_w+item_d for rect)"
+                )
+            if self.item_w is not None or self.item_d is not None:
+                raise ValueError(
+                    "round pockets take item_dia, not item_w+item_d"
+                )
+        if self.resolved_clearance < 0:
+            raise ValueError("fit clearance cannot be negative")
+        if self.pocket_wall < 0:
+            raise ValueError("pocket wall cannot be negative")
+        if self.pocket_corner_radius < 0:
+            raise ValueError("pocket corner radius cannot be negative")
+        if self.proud < 0:
+            raise ValueError("proud cannot be negative")
+        for name in ("item_w", "item_d", "item_dia", "item_height"):
+            value = getattr(self, name)
+            if value is not None and value <= 0:
+                raise ValueError(f"{name} must be positive")
+        for name in ("rows", "cols", "count"):
+            value = getattr(self, name)
+            if value is not None and value < 1:
+                raise ValueError(f"{name} must be at least 1")
+        # A single pocket must fit the interior on both axes.
+        if self.pocket_w > self.interior_w or self.pocket_d > self.interior_l:
+            raise ValueError("pocket wider than interior")
+        # At least one pocket must fit.
+        if self.pocket_count < 1:
+            raise ValueError("no pockets fit the interior")
+        # The pocket depth must be positive and never breach the floor.
+        if self.resolved_pocket_depth <= 0:
+            raise ValueError("pocket depth must be positive")
+        if self.resolved_pocket_depth > self.available_depth + 1e-9:
+            raise ValueError("pocket deeper than interior; would breach the floor")
+
+    # --- fit resolution (mirrors resolved_lip_wall) ------------------------
+
+    @property
+    def resolved_clearance(self) -> float:
+        """Per-side pocket clearance, mm.
+
+        The explicit ``fit_clearance`` wins; otherwise the ``fit`` preset maps
+        to mm via :data:`FIT_PRESETS`. Mirrors ``BinConfig.resolved_lip_wall``:
+        geometry reads this, never the raw preset/override fields.
+        """
+        if self.fit_clearance is not None:
+            return self.fit_clearance
+        return FIT_PRESETS[self.fit]
+
+    # --- pocket footprint --------------------------------------------------
+
+    @property
+    def pocket_dia(self) -> float:
+        """Round pocket diameter = item diameter + 2 x clearance, mm.
+
+        Only meaningful for ``round`` pockets; raises for ``rect`` (no diameter).
+        """
+        if self.pocket_shape != "round":
+            raise ValueError("pocket_dia is only defined for round pockets")
+        return self.item_dia + 2 * self.resolved_clearance
+
+    @property
+    def pocket_w(self) -> float:
+        """Pocket footprint width, mm.
+
+        Rect: ``item_w + 2 x clearance``. Round: the pocket diameter (a round
+        pocket has a square footprint for layout -- width == depth == diameter).
+        """
+        if self.pocket_shape == "round":
+            return self.pocket_dia
+        return self.item_w + 2 * self.resolved_clearance
+
+    @property
+    def pocket_d(self) -> float:
+        """Pocket footprint depth, mm (see :meth:`pocket_w`)."""
+        if self.pocket_shape == "round":
+            return self.pocket_dia
+        return self.item_d + 2 * self.resolved_clearance
+
+    # --- interior (delegates to the bin) -----------------------------------
+
+    @property
+    def interior_w(self) -> float:
+        """Interior opening along X (the bin inner width), mm."""
+        return self.bin.inner_width
+
+    @property
+    def interior_l(self) -> float:
+        """Interior opening along Y (the bin inner length), mm."""
+        return self.bin.inner_length
+
+    # --- layout math (the single source of truth, no CadQuery) -------------
+
+    @property
+    def grid_cols(self) -> int:
+        """Pockets across X.
+
+        The doc formula ``floor((interior_w + pocket_wall)/(pocket_w +
+        pocket_wall))``, overridden by an explicit ``cols`` when given. Floored
+        at 0 so a too-wide pocket (caught in validation) never reports negative.
+        """
+        if self.cols is not None:
+            return self.cols
+        pitch = self.pocket_w + self.pocket_wall
+        if pitch <= 0:
+            return 0
+        return max(0, int((self.interior_w + self.pocket_wall) / pitch + 1e-9))
+
+    @property
+    def grid_rows(self) -> int:
+        """Pockets along Y (see :meth:`grid_cols`), overridden by ``rows``."""
+        if self.rows is not None:
+            return self.rows
+        pitch = self.pocket_d + self.pocket_wall
+        if pitch <= 0:
+            return 0
+        return max(0, int((self.interior_l + self.pocket_wall) / pitch + 1e-9))
+
+    @property
+    def pocket_pitch_x(self) -> float:
+        """Center-to-center pocket spacing along X (pocket_w + pocket_wall), mm."""
+        return self.pocket_w + self.pocket_wall
+
+    @property
+    def pocket_pitch_y(self) -> float:
+        """Center-to-center pocket spacing along Y (pocket_d + pocket_wall), mm."""
+        return self.pocket_d + self.pocket_wall
+
+    @property
+    def pocket_count(self) -> int:
+        """Total pockets in the grid (rows x cols)."""
+        return self.grid_rows * self.grid_cols
+
+    @property
+    def leftover_x(self) -> float:
+        """Interior margin along X not consumed by the pocket block, mm.
+
+        ``interior_w - (cols * pocket_w + (cols - 1) * pocket_wall)`` -- the
+        "bonus" open space left over once the whole-pocket block is placed.
+        """
+        cols = self.grid_cols
+        if cols < 1:
+            return self.interior_w
+        block = cols * self.pocket_w + (cols - 1) * self.pocket_wall
+        return self.interior_w - block
+
+    @property
+    def leftover_y(self) -> float:
+        """Interior margin along Y not consumed by the pocket block, mm."""
+        rows = self.grid_rows
+        if rows < 1:
+            return self.interior_l
+        block = rows * self.pocket_d + (rows - 1) * self.pocket_wall
+        return self.interior_l - block
+
+    # --- depth -------------------------------------------------------------
+
+    @property
+    def available_depth(self) -> float:
+        """Usable pocket depth above the cavity floor, mm.
+
+        The span between the interior floor (``cavity_bottom``) and the top of
+        the body (``total_height``); a pocket deeper than this would breach the
+        foot/floor, so the resolved depth is clamped to it.
+        """
+        return self.bin.total_height - self.bin.cavity_bottom
+
+    @property
+    def resolved_pocket_depth(self) -> float:
+        """Cavity depth cut down from the top of the body interior, mm.
+
+        Resolution order: an explicit ``pocket_depth`` wins and is used
+        verbatim (so an over-deep value is caught by the floor-breach guard in
+        ``__post_init__`` rather than silently shrunk); else if ``item_height``
+        is given the depth is ``item_height - proud`` (so the item stands
+        ``proud`` mm above the wall), clamped to the available depth because the
+        units auto-fit already sizes the bin to the item; else the full
+        available depth (pockets go to the floor).
+        """
+        if self.pocket_depth is not None:
+            return self.pocket_depth
+        if self.item_height is not None:
+            return min(self.item_height - self.proud, self.available_depth)
+        return self.available_depth
+
+    # --- bin delegation (the properties geometry/exporter read) ------------
+
+    @property
+    def width(self) -> float:
+        return self.bin.width
+
+    @property
+    def length(self) -> float:
+        return self.bin.length
+
+    @property
+    def cavity_bottom(self) -> float:
+        return self.bin.cavity_bottom
+
+    @property
+    def total_height(self) -> float:
+        return self.bin.total_height

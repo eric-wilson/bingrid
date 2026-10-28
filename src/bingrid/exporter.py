@@ -14,7 +14,18 @@ from xml.sax.saxutils import quoteattr
 
 import cadquery as cq
 
-from .config import BinConfig, GridConfig
+from .config import BinConfig, GridConfig, HolderConfig
+
+
+def _trim(value: float) -> str:
+    """Render a measurement for a file name: drop a trailing ``.0`` only.
+
+    ``26.5`` stays ``26.5``; ``60.0`` becomes ``60`` so an integer-valued
+    dimension does not pick up a spurious decimal, matching the tidy numeric
+    tags the bin name uses.
+    """
+    text = f"{value:g}"
+    return text
 
 
 class ModelExporter:
@@ -66,6 +77,29 @@ class ModelExporter:
         name += "_lip" if config.stacking_lip else "_nolip"
         if config.floor > 0:
             name += f"_floor{config.floor}"
+        return name
+
+    def holder_default_name(self, config: HolderConfig) -> str:
+        """Descriptive, reproducible base file name for a holder config.
+
+        A separate method (not an overload of ``bin_default_name``) so the bin
+        path stays byte-stable. Pattern: ``holder_{x}x{y}_{R}x{C}_{shape}_u{units}``
+        with an item-size tag -- bin grid, pocket grid (rows x cols), pocket
+        shape, height units, item dims. For a 1x1 bin with a 2x2 rect grid this
+        is ``holder_1x1_2x2_rect_u7_26.5x17.5``; a round grid tags the diameter
+        (``..._round_u7_dia14.5``). Floats keep their trailing form so the name
+        round-trips to the measurements that produced it.
+        """
+        b = config.bin
+        name = (
+            f"holder_{b.grid_x}x{b.grid_y}"
+            f"_{config.grid_rows}x{config.grid_cols}"
+            f"_{config.pocket_shape}_u{b.height_units}"
+        )
+        if config.pocket_shape == "round":
+            name += f"_dia{_trim(config.item_dia)}"
+        else:
+            name += f"_{_trim(config.item_w)}x{_trim(config.item_d)}"
         return name
 
     def export(

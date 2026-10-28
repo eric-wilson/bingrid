@@ -20,7 +20,7 @@ from typing import Iterator, List, Tuple
 
 import cadquery as cq
 
-from .config import BinConfig, GridConfig, Plane
+from .config import BinConfig, GridConfig, HolderConfig, Plane
 
 
 def _loft_profile(
@@ -880,6 +880,112 @@ class StackingLipFeature(BinFeature):
             .translate((0, 0, z0 + config.lip_h))
         )
         return ring.cut(cavity).cut(over_top)
+
+
+class PocketGridFeature(BinFeature):
+    """Subtracts the R x C item-pocket array from the hollow interior.
+
+    A SUBTRACTIVE feature (the locked v1 decision): it cuts the pocket grid
+    directly from the SOLID interior of the body (the pockets ARE the
+    hollowing), reusing the ``cavity_bottom`` clamp so a pocket never breaches
+    the foot/floor. The ribs between pockets are the solid left standing. The
+    plain :class:`HollowInteriorFeature` is NOT run alongside this feature -- a
+    full-cavity cut would leave nothing for the pockets to carve. The
+    alternative (an additive rib lattice) is deliberately not built in v1.
+
+    Round pockets are a vertical cylinder cut (axis +Z -- prints round, no
+    teardrop); rect pockets are a filleted rounded-rect prism cut (internal
+    corners rounded to ``pocket_corner_radius``). Each tool over-cuts 1 mm above
+    the body top so the pocket opening punches cleanly at the mouth, and each
+    floor sits at ``total_height - resolved_pocket_depth`` clamped to
+    ``>= cavity_bottom``.
+
+    The pocket block spans ``cols*pocket_w + (cols-1)*pocket_wall`` x the row
+    equivalent; when ``center_grid`` it is centered on the origin, otherwise
+    (``--pack``) it is pushed to the ``-x/-y`` corner so the leftover margin is
+    one contiguous open strip.
+
+    The feature carries its own :class:`HolderConfig` (the pocket spec is
+    holder-specific), so :class:`GridfinityBin` is driven by the inner
+    ``BinConfig`` exactly as for a plain bin -- the body/foot/hollow/lip
+    features read the bin config they expect -- while this feature reads the
+    holder config it was constructed with. The builder stays untouched and the
+    holder generator simply injects this feature into the pipeline (Open/Closed).
+    """
+
+    def __init__(self, holder: HolderConfig):
+        self.holder = holder
+
+    def apply(self, model: cq.Workplane, config: BinConfig) -> cq.Workplane:
+        config = self.holder
+        rows, cols = config.grid_rows, config.grid_cols
+        if rows < 1 or cols < 1:
+            return model
+
+        # Pocket floor z: down from the body top by the resolved depth, clamped
+        # no lower than the cavity bottom (the same clamp the hollow body uses),
+        # so the foot/floor region is never breached.
+        floor_z = config.total_height - config.resolved_pocket_depth
+        floor_z = max(floor_z, config.cavity_bottom)
+        # Over-cut 1 mm above the body top so the opening punches at the mouth.
+        cut_height = config.total_height - floor_z + 1.0
+
+        # Grid origin. The block of whole pockets spans ``block_x`` x ``block_y``;
+        # centering puts its center on the origin, packing pushes it to the
+        # -x/-y corner of the interior so the leftover is one contiguous strip.
+        block_x = cols * config.pocket_w + (cols - 1) * config.pocket_wall
+        block_y = rows * config.pocket_d + (rows - 1) * config.pocket_wall
+        if config.center_grid:
+            x0 = -block_x / 2.0
+            y0 = -block_y / 2.0
+        else:
+            # Pack toward the -x/-y corner: the block starts at the interior's
+            # low corner, so the whole leftover margin sits on the +x/+y side.
+            x0 = -config.interior_w / 2.0
+            y0 = -config.interior_l / 2.0
+
+        for i in range(cols):
+            for j in range(rows):
+                cx = x0 + (i + 0.5) * config.pocket_pitch_x
+                cy = y0 + (j + 0.5) * config.pocket_pitch_y
+                model = model.cut(
+                    self._pocket(config, cx, cy, floor_z, cut_height)
+                )
+        return model
+
+    @staticmethod
+    def _pocket(
+        config: HolderConfig,
+        cx: float,
+        cy: float,
+        floor_z: float,
+        cut_height: float,
+    ) -> cq.Workplane:
+        """One pocket cut tool, centered on ``(cx, cy)`` with floor at ``floor_z``.
+
+        Round: a vertical cylinder of ``pocket_dia`` diameter. Rect: a box of
+        ``pocket_w x pocket_d`` with its four vertical edges filleted to
+        ``pocket_corner_radius`` (guarded on > 0, the same pattern the body and
+        cavity use). Both are ``cut_height`` tall so they over-cut the mouth.
+        """
+        if config.pocket_shape == "round":
+            solid = cq.Solid.makeCylinder(
+                config.pocket_dia / 2.0,
+                cut_height,
+                cq.Vector(cx, cy, floor_z),
+                cq.Vector(0, 0, 1),
+            )
+            return cq.Workplane("XY").newObject([solid])
+
+        pocket = cq.Workplane("XY").box(
+            config.pocket_w,
+            config.pocket_d,
+            cut_height,
+            centered=(True, True, False),
+        )
+        if config.pocket_corner_radius > 0:
+            pocket = pocket.edges("|Z").fillet(config.pocket_corner_radius)
+        return pocket.translate((cx, cy, floor_z))
 
 
 class GridfinityBin:

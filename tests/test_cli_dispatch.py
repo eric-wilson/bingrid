@@ -63,6 +63,48 @@ def test_grid_wall_too_thin_validation_error(app, tmp_path, capsys):
 
 # --- bin precheck trio ------------------------------------------------------
 
+# --- holder precheck / validation exit-code-2 cases -------------------------
+
+def test_holder_rect_with_dia_exits_2(app, tmp_path, capsys):
+    rc = app.main(
+        ["holder", "--pocket-shape", "rect", "--item-dia", "10",
+         "--output-dir", str(tmp_path)]
+    )
+    assert rc == 2
+    assert "error:" in capsys.readouterr().out
+    assert not list(tmp_path.glob("*"))
+
+
+def test_holder_round_without_dia_exits_2(app, tmp_path, capsys):
+    rc = app.main(
+        ["holder", "--pocket-shape", "round", "--output-dir", str(tmp_path)]
+    )
+    assert rc == 2
+    assert "error:" in capsys.readouterr().out
+    assert not list(tmp_path.glob("*"))
+
+
+def test_holder_rect_missing_dim_exits_2(app, tmp_path, capsys):
+    rc = app.main(
+        ["holder", "--pocket-shape", "rect", "--item-w", "20",
+         "--output-dir", str(tmp_path)]
+    )
+    assert rc == 2
+    assert "error:" in capsys.readouterr().out
+    assert not list(tmp_path.glob("*"))
+
+
+def test_holder_item_wider_than_interior_exits_2(app, tmp_path, capsys):
+    # A 60 mm item pinned to a 1x1 bin cannot fit the ~39 mm interior.
+    rc = app.main(
+        ["holder", "--x", "1", "--y", "1", "--pocket-shape", "rect",
+         "--item-w", "60", "--item-d", "30", "--output-dir", str(tmp_path)]
+    )
+    assert rc == 2
+    assert "error:" in capsys.readouterr().out
+    assert not list(tmp_path.glob("*.stl"))
+
+
 @pytest.mark.parametrize("flag", ["--3mf", "--split-lip", "--3mf-paint"])
 def test_bin_precheck_requires_lip(app, tmp_path, capsys, flag):
     rc = app.main(
