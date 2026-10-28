@@ -269,8 +269,16 @@ def _prompt_one(console, opt: OptionSpec) -> Any:
         _describe(console, opt, _default_display(opt))
         raw = _ask_text(_pretty_name(opt.flag), _default_display(opt))
         # EMPTY input short-circuits to the schema default BEFORE any type
-        # conversion (so None/auto stays None and Path(".output") is kept).
+        # conversion (so None/auto stays None and Path(".output") is kept) —
+        # UNLESS the option is required, in which case there is no acceptable
+        # default to fall back to, so re-prompt until a value is given. (A
+        # gated-out required option is never reached here; walk_options skips it
+        # and keeps its None default, so requiredness only fires on a SHOWN
+        # prompt.)
         if raw == "":
+            if opt.required:
+                console.print("[red]this value is required[/red]")
+                continue
             return opt.default
         try:
             return convert(raw)

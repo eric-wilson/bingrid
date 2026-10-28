@@ -49,17 +49,17 @@ OPTIONS = (
     ),
     OptionSpec(
         "item_w", "--item-w", OptionType.FLOAT,
-        "rect item footprint width, mm", default=None,
+        "rect item footprint width, mm", default=None, required=True,
         prompt_when=(("pocket_shape", "rect"),),
     ),
     OptionSpec(
         "item_d", "--item-d", OptionType.FLOAT,
-        "rect item footprint depth, mm", default=None,
+        "rect item footprint depth, mm", default=None, required=True,
         prompt_when=(("pocket_shape", "rect"),),
     ),
     OptionSpec(
         "item_dia", "--item-dia", OptionType.FLOAT,
-        "round item diameter, mm", default=None,
+        "round item diameter, mm", default=None, required=True,
         prompt_when=(("pocket_shape", "round"),),
     ),
     OptionSpec(

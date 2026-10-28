@@ -67,6 +67,19 @@ class OptionSpec:
     bool_style: BoolStyle | None = None
     negative_flag: str | None = None
     prompt: bool = True
+    # Interactive-walkthrough requiredness (optional). ``required=True`` marks a
+    # scalar option (INT/FLOAT/STR/PATH) with ``default=None`` that the
+    # walkthrough must NOT satisfy with empty input: it re-prompts until a value
+    # is given, instead of falling back to the default. It is only coherent when
+    # there is no sensible default (hence ``default=None`` is enforced; a
+    # non-None default is contradictory and rejected). It composes with
+    # ``prompt_when``: a required option whose gate is unmet is not prompted and
+    # keeps its ``None`` default — requiredness applies ONLY when the prompt is
+    # actually shown. BOOL always carries a concrete default and CHOICE a
+    # non-None default, so neither may be required. This is DATA for the prompter
+    # only; argparse is unaffected (non-interactive callers still pass the flag
+    # or hit the generator's own precheck).
+    required: bool = False
     # Interactive-prompt overrides (optional). ``prompt_label`` is the positive
     # feature name shown in a BOOL prompt (e.g. "Magnet pockets") so a negative
     # flag like --no-magnets is never asked as a double negative; ``prompt_help``
@@ -102,6 +115,23 @@ class OptionSpec:
                 f"OptionSpec {self.flag!r}: prompt_label/prompt_help apply only "
                 f"to BOOL options"
             )
+
+        if not isinstance(self.required, bool):
+            raise ValueError(
+                f"OptionSpec {self.flag!r}: required must be a bool, "
+                f"got {self.required!r}"
+            )
+        if self.required:
+            if self.type not in _SCALAR_TYPES:
+                raise ValueError(
+                    f"OptionSpec {self.flag!r}: required applies only to scalar "
+                    f"options"
+                )
+            if self.default is not None:
+                raise ValueError(
+                    f"OptionSpec {self.flag!r}: a required option must have "
+                    f"default=None"
+                )
 
         if self.prompt_when is not None:
             if not isinstance(self.prompt_when, tuple) or not self.prompt_when:

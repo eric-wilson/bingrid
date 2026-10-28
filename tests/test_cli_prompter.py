@@ -382,6 +382,116 @@ def test_ask_bool_yes_no_and_default(monkeypatch):
     assert prompter._ask_bool("magnets", True) is True
 
 
+# --- required scalar enforcement (holder item dimensions) ------------------
+
+def test_walk_required_scalar_reprompts_on_empty_then_accepts(monkeypatch):
+    """A shown required scalar re-prompts on empty input, then takes a value.
+
+    The first read of --item-w returns '' (which must NOT be accepted as the
+    None default); the walkthrough re-prompts and the second read supplies the
+    value. Proof: --item-w is called twice and the namespace carries the value.
+    """
+    import bingrid.cli.generators.holder as holder
+
+    pretty = {o.dest: prompter._pretty_name(o.flag) for o in holder.SPEC.options}
+    # Per-label answer iterators: item_w yields '' then '26.5'; item_d yields a
+    # value directly; everything else accepts its default via ''.
+    scripted = {
+        pretty["item_w"]: iter(["", "26.5"]),
+        pretty["item_d"]: iter(["17.5"]),
+    }
+    calls = {}
+
+    def fake_text(label, default_display):
+        calls[label] = calls.get(label, 0) + 1
+        answers = scripted.get(label)
+        if answers is None:
+            return ""
+        return next(answers)
+
+    monkeypatch.setattr(prompter, "_ask_text", fake_text)
+    monkeypatch.setattr(
+        prompter, "_ask_choice",
+        lambda label, choices, default: "rect"
+        if label == pretty["pocket_shape"] else default,
+    )
+    monkeypatch.setattr(prompter, "_ask_bool", lambda label, default: default)
+
+    ns = prompter.walk_options(holder.SPEC)
+    assert ns.item_w == 26.5
+    assert ns.item_d == 17.5
+    # item_w was read twice: once empty (re-prompted), once with the value.
+    assert calls[pretty["item_w"]] == 2
+
+
+def test_walk_gated_out_required_option_not_prompted_stays_none(monkeypatch):
+    """shape=round: the rect-gated required --item-w/--item-d are never asked.
+
+    A gated-out required option must NOT trigger requiredness; the gate skips
+    the prompt and the option keeps its None default. --item-dia (the round-
+    gated required option) IS asked and supplies a value.
+    """
+    import bingrid.cli.generators.holder as holder
+
+    asked = []
+    pretty = {o.dest: prompter._pretty_name(o.flag) for o in holder.SPEC.options}
+    label_to_dest = {v: k for k, v in pretty.items()}
+
+    def recording_text(label, default_display):
+        dest = label_to_dest.get(label, label)
+        asked.append(dest)
+        return "14.5" if dest == "item_dia" else ""
+
+    monkeypatch.setattr(prompter, "_ask_text", recording_text)
+    monkeypatch.setattr(
+        prompter, "_ask_choice",
+        lambda label, choices, default: "round"
+        if label == pretty["pocket_shape"] else default,
+    )
+    monkeypatch.setattr(prompter, "_ask_bool", lambda label, default: default)
+
+    ns = prompter.walk_options(holder.SPEC)
+    assert "item_w" not in asked
+    assert "item_d" not in asked
+    assert ns.item_w is None and ns.item_d is None
+    assert ns.item_dia == 14.5
+
+
+def test_walk_shown_required_option_answered_builds_valid_config(monkeypatch):
+    """shape=rect with item-w/item-d answered -> a valid HolderConfig builds."""
+    import bingrid.cli.generators.holder as holder
+    from bingrid.config import HolderConfig
+
+    ns = _walk(
+        monkeypatch, holder.SPEC,
+        text_answers={"x": "1", "y": "1", "item_w": "26.5", "item_d": "17.5"},
+        choice_answers={"pocket_shape": "rect"},
+    )
+    cfg = holder.build_config(ns)
+    assert isinstance(cfg, HolderConfig)
+    assert cfg.item_w == pytest.approx(26.5)
+    assert cfg.item_d == pytest.approx(17.5)
+
+
+def test_walk_holder_optional_none_defaults_still_accept_empty(monkeypatch):
+    """Optional None-default holder options keep None on empty input.
+
+    The required change must not force genuinely-optional scalars: with the two
+    required rect dims supplied, un-answered optionals (units, name, lip_wall)
+    stay None.
+    """
+    import bingrid.cli.generators.holder as holder
+
+    ns = _walk(
+        monkeypatch, holder.SPEC,
+        text_answers={"item_w": "26.5", "item_d": "17.5"},
+        choice_answers={"pocket_shape": "rect"},
+    )
+    assert ns.units is None
+    assert ns.name is None
+    assert ns.lip_wall is None
+
+
 class _NullConsole:
     def print(self, *a, **k):
         pass
