@@ -108,6 +108,142 @@ def test_walk_grid_choice_and_bool(monkeypatch):
     assert cfg.connector.enabled is True
 
 
+def test_walk_skips_magnet_suboptions_when_magnets_off(monkeypatch):
+    import bingrid.cli.generators.grid as grid
+
+    asked = []
+    pretty = {o.dest: prompter._pretty_name(o.flag) for o in grid.SPEC.options}
+    label_to_dest = {v: k for k, v in pretty.items()}
+
+    def recording_text(label, default_display):
+        asked.append(label_to_dest.get(label, label))
+        return ""  # accept default
+
+    def recording_choice(label, choices, default):
+        asked.append(label_to_dest.get(label, label))
+        return default
+
+    monkeypatch.setattr(prompter, "_ask_text", recording_text)
+    monkeypatch.setattr(prompter, "_ask_choice", recording_choice)
+    # Magnets off, connectors off -> no sub-questions for either.
+    monkeypatch.setattr(prompter, "_ask_bool", lambda label, default: False)
+
+    ns = prompter.walk_options(grid.SPEC)
+
+    magnet_subs = [
+        "magnet_diameter", "magnet_depth", "magnet_clearance",
+        "magnet_glue_gap", "magnet_orientation", "magnet_shape",
+        "magnet_teardrop_angle",
+    ]
+    connector_subs = [
+        "connector_width", "connector_depth", "connector_flare",
+        "connector_clearance",
+    ]
+    for dest in magnet_subs + connector_subs:
+        assert dest not in asked, f"should not prompt {dest} when feature off"
+    # Skipped options still land on their schema defaults.
+    assert ns.magnet_diameter == 3.0
+    assert ns.connector_width == 8.0
+    # And the config still builds with the feature disabled.
+    cfg = grid.build_config(ns)
+    assert cfg.magnet.enabled is False
+    assert cfg.connector.enabled is False
+
+
+def test_walk_asks_magnet_suboptions_when_magnets_on(monkeypatch):
+    import bingrid.cli.generators.grid as grid
+
+    asked = []
+    pretty = {o.dest: prompter._pretty_name(o.flag) for o in grid.SPEC.options}
+    label_to_dest = {v: k for k, v in pretty.items()}
+
+    monkeypatch.setattr(
+        prompter, "_ask_text",
+        lambda label, dd: (asked.append(label_to_dest.get(label, label)), "")[1],
+    )
+    monkeypatch.setattr(
+        prompter, "_ask_choice",
+        lambda label, choices, default:
+            (asked.append(label_to_dest.get(label, label)), default)[1],
+    )
+    # Magnets on (default), connectors off.
+    monkeypatch.setattr(
+        prompter, "_ask_bool",
+        lambda label, default: default,
+    )
+
+    prompter.walk_options(grid.SPEC)
+    assert "magnet_diameter" in asked
+    assert "magnet_shape" in asked
+    # teardrop angle gates on magnet_shape == teardrop (the default), so asked.
+    assert "magnet_teardrop_angle" in asked
+    # connectors off -> connector dims skipped.
+    assert "connector_width" not in asked
+
+
+def test_walk_teardrop_angle_skipped_when_shape_round(monkeypatch):
+    import bingrid.cli.generators.grid as grid
+
+    asked = []
+    pretty = {o.dest: prompter._pretty_name(o.flag) for o in grid.SPEC.options}
+    label_to_dest = {v: k for k, v in pretty.items()}
+
+    monkeypatch.setattr(
+        prompter, "_ask_text",
+        lambda label, dd: (asked.append(label_to_dest.get(label, label)), "")[1],
+    )
+
+    def choose(label, choices, default):
+        dest = label_to_dest.get(label, label)
+        asked.append(dest)
+        return "round" if dest == "magnet_shape" else default
+
+    monkeypatch.setattr(prompter, "_ask_choice", choose)
+    monkeypatch.setattr(prompter, "_ask_bool", lambda label, default: default)
+
+    ns = prompter.walk_options(grid.SPEC)
+    # Shape is round -> teardrop angle is not meaningful, so not prompted.
+    assert "magnet_shape" in asked
+    assert "magnet_teardrop_angle" not in asked
+    assert ns.magnet_teardrop_angle == 45.0  # schema default retained
+
+
+def test_walk_bin_skips_lip_and_band_suboptions_when_off(monkeypatch):
+    import bingrid.cli.generators.bin as bin_
+
+    asked = []
+    pretty = {o.dest: prompter._pretty_name(o.flag) for o in bin_.SPEC.options}
+    label_bool = {o.dest: prompter._bool_label(o) for o in bin_.SPEC.options
+                  if o.type.name == "BOOL"}
+    text_to_dest = {v: k for k, v in pretty.items()}
+    bool_to_dest = {v: k for k, v in label_bool.items()}
+
+    monkeypatch.setattr(
+        prompter, "_ask_text",
+        lambda label, dd: (asked.append(text_to_dest.get(label, label)), "")[1],
+    )
+    monkeypatch.setattr(
+        prompter, "_ask_choice",
+        lambda label, choices, default:
+            (asked.append(text_to_dest.get(label, label)), default)[1],
+    )
+
+    # stacking_lip OFF, three_mf_paint OFF -> lip + band sub-options skipped.
+    def ask_bool(label, default):
+        asked.append(bool_to_dest.get(label, label))
+        return False
+
+    monkeypatch.setattr(prompter, "_ask_bool", ask_bool)
+
+    ns = prompter.walk_options(bin_.SPEC)
+    for dest in ("lip_clearance", "lip_wall", "base_overlap", "split_lip",
+                 "three_mf", "color_band", "color_band_start",
+                 "color_band_height", "color_band_extruder"):
+        assert dest not in asked, f"should not prompt {dest} when feature off"
+    cfg = bin_.build_config(ns)
+    assert cfg.stacking_lip is False
+
+
 def test_walk_path_empty_keeps_default_path(monkeypatch):
     import bingrid.cli.generators.bin as bin_
 

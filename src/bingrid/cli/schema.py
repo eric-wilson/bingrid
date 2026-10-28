@@ -74,6 +74,15 @@ class OptionSpec:
     # interactive walkthrough; argparse flags/help are unchanged.
     prompt_label: str | None = None
     prompt_help: str | None = None
+    # Dependency gate for the interactive walkthrough (optional). A tuple of
+    # (dest, value) conditions; the option is prompted only when EVERY named
+    # earlier option already equals its value (e.g. a magnet sub-option gates
+    # on ("magnets", True); the teardrop angle on both ("magnets", True) and
+    # ("magnet_shape", "teardrop")). When a gate is unmet the walkthrough skips
+    # the prompt and uses the schema default, so build_config still gets a
+    # complete namespace. Does NOT affect argparse (all flags stay available
+    # non-interactively).
+    prompt_when: tuple[tuple[str, Any], ...] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.flag, str) or not self.flag.startswith("--"):
@@ -93,6 +102,20 @@ class OptionSpec:
                 f"OptionSpec {self.flag!r}: prompt_label/prompt_help apply only "
                 f"to BOOL options"
             )
+
+        if self.prompt_when is not None:
+            if not isinstance(self.prompt_when, tuple) or not self.prompt_when:
+                raise ValueError(
+                    f"OptionSpec {self.flag!r}: prompt_when must be a non-empty "
+                    f"tuple of (dest, value) conditions"
+                )
+            for cond in self.prompt_when:
+                if (not isinstance(cond, tuple) or len(cond) != 2
+                        or not isinstance(cond[0], str) or not cond[0]):
+                    raise ValueError(
+                        f"OptionSpec {self.flag!r}: each prompt_when condition "
+                        f"must be a (dest, value) pair: {cond!r}"
+                    )
 
         if self.type is OptionType.CHOICE:
             if not isinstance(self.choices, tuple) or not self.choices:
@@ -173,4 +196,15 @@ class GeneratorSpec:
                 raise ValueError(
                     f"GeneratorSpec {self.name!r} has duplicate dest {opt.dest!r}"
                 )
+            # A prompt_when gate may only reference options that appear EARLIER,
+            # so the controlling answer is already in the namespace when the
+            # walkthrough evaluates the gate.
+            if opt.prompt_when is not None:
+                for gate_dest, _ in opt.prompt_when:
+                    if gate_dest not in seen:
+                        raise ValueError(
+                            f"GeneratorSpec {self.name!r}: option {opt.flag!r} "
+                            f"gates on {gate_dest!r}, which must appear earlier "
+                            f"in the options list"
+                        )
             seen.add(opt.dest)

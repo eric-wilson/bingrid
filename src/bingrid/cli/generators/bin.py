@@ -82,17 +82,20 @@ OPTIONS = (
     OptionSpec(
         "lip_clearance", "--lip-clearance", OptionType.FLOAT,
         "per-side seating gap inside the lip, mm (default: 0.25)", default=0.25,
+        prompt_when=(("stacking_lip", True),),
     ),
     OptionSpec(
         "lip_wall", "--lip-wall", OptionType.FLOAT,
         "outer wall of the stacking-lip rim ring, mm "
         "(default: derived from the socket, ~1.90)",
         default=None,
+        prompt_when=(("stacking_lip", True),),
     ),
     OptionSpec(
         "base_overlap", "--base-overlap", OptionType.FLOAT,
         "mm the foot's mouth flare overlaps the body (default: 1.0)",
         default=1.0,
+        prompt_when=(("stacking_lip", True),),
     ),
     OptionSpec(
         "split_lip", "--split-lip", OptionType.BOOL,
@@ -100,6 +103,7 @@ OPTIONS = (
         bool_style=BoolStyle.POSITIVE_ON,
         prompt_label="Split body/lip STLs",
         prompt_help="export the body and lip as separate STL meshes",
+        prompt_when=(("stacking_lip", True),),
     ),
     OptionSpec(
         "three_mf", "--3mf", OptionType.BOOL,
@@ -109,6 +113,7 @@ OPTIONS = (
         prompt_label="Two-body .3mf",
         prompt_help="export the body and lip as two named bodies in one .3mf "
                     "file (single-file two-color alternative to split STLs)",
+        prompt_when=(("stacking_lip", True),),
     ),
     # color band group
     OptionSpec(
@@ -132,20 +137,24 @@ OPTIONS = (
         prompt_label="Mid-wall color band",
         prompt_help="with painted .3mf, paint a mid-wall horizontal band "
                     "instead of the lip (no stacking lip required)",
+        prompt_when=(("three_mf_paint", True),),
     ),
     OptionSpec(
         "color_band_start", "--color-band-start", OptionType.FLOAT,
         "z of the band bottom in part coords, mm "
         "(default: auto -- centered in the bin wall)",
         default=None,
+        prompt_when=(("three_mf_paint", True), ("color_band", True)),
     ),
     OptionSpec(
         "color_band_height", "--color-band-height", OptionType.FLOAT,
         "color band thickness, mm (default: 5.0)", default=5.0,
+        prompt_when=(("three_mf_paint", True), ("color_band", True)),
     ),
     OptionSpec(
         "color_band_extruder", "--color-band-extruder", OptionType.INT,
         "filament/extruder painted onto the band (default: 2)", default=2,
+        prompt_when=(("three_mf_paint", True), ("color_band", True)),
     ),
     # output group
     OptionSpec(

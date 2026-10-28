@@ -91,34 +91,41 @@ OPTIONS = (
     OptionSpec(
         "magnet_diameter", "--magnet-diameter", OptionType.FLOAT,
         "magnet diameter in mm (default: 3.0)", default=3.0,
+        prompt_when=(("magnets", True),),
     ),
     OptionSpec(
         "magnet_depth", "--magnet-depth", OptionType.FLOAT,
         "magnet depth in mm (default: 1.0)", default=1.0,
+        prompt_when=(("magnets", True),),
     ),
     OptionSpec(
         "magnet_clearance", "--magnet-clearance", OptionType.FLOAT,
         "added to diameter for fit, mm (default: 0.2)", default=0.2,
+        prompt_when=(("magnets", True),),
     ),
     OptionSpec(
         "magnet_glue_gap", "--magnet-glue-gap", OptionType.FLOAT,
         "extra pocket depth for glue, mm (default: 0.3)", default=0.3,
+        prompt_when=(("magnets", True),),
     ),
     OptionSpec(
         "magnet_orientation", "--magnet-orientation", OptionType.CHOICE,
         "pocket mount: 'horizontal' = edge, 'vertical' = bottom face "
         "(default: horizontal)",
         default="horizontal", choices=("horizontal", "vertical"),
+        prompt_when=(("magnets", True),),
     ),
     OptionSpec(
         "magnet_shape", "--magnet-shape", OptionType.CHOICE,
         "horizontal pocket shape: 'teardrop' prints round-bored without "
         "support, 'round' is a plain cylinder (default: teardrop)",
         default="teardrop", choices=("teardrop", "round"),
+        prompt_when=(("magnets", True),),
     ),
     OptionSpec(
         "magnet_teardrop_angle", "--magnet-teardrop-angle", OptionType.FLOAT,
         "teardrop roof half-angle in degrees (default: 45)", default=45.0,
+        prompt_when=(("magnets", True), ("magnet_shape", "teardrop")),
     ),
     # connector group
     OptionSpec(
@@ -131,19 +138,23 @@ OPTIONS = (
     OptionSpec(
         "connector_width", "--connector-width", OptionType.FLOAT,
         "dovetail mouth width in mm (default: 8.0)", default=8.0,
+        prompt_when=(("connectors", True),),
     ),
     OptionSpec(
         "connector_depth", "--connector-depth", OptionType.FLOAT,
         "dovetail depth in mm; must be < wall (default: 4.0)", default=4.0,
+        prompt_when=(("connectors", True),),
     ),
     OptionSpec(
         "connector_flare", "--connector-flare", OptionType.FLOAT,
         "dovetail flare (half the mouth/base difference), mm (default: 1.5)",
         default=1.5,
+        prompt_when=(("connectors", True),),
     ),
     OptionSpec(
         "connector_clearance", "--connector-clearance", OptionType.FLOAT,
         "per-side sliding gap on the male tab, mm (default: 0.15)", default=0.15,
+        prompt_when=(("connectors", True),),
     ),
     # output group
     OptionSpec(

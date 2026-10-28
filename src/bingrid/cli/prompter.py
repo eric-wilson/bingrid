@@ -213,15 +213,40 @@ def select_item(specs: "list[GeneratorSpec]") -> str:
 
 
 def walk_options(spec: GeneratorSpec) -> Namespace:
-    """Guided per-option walkthrough; returns a Namespace with every dest set."""
+    """Guided per-option walkthrough; returns a Namespace with every dest set.
+
+    Options are prompted in order. An option is SKIPPED (set to its schema
+    default) when either ``prompt`` is False or its ``prompt_when`` dependency
+    gate is unmet given the answers collected so far — so declining a feature
+    (e.g. magnets off, connectors off) suppresses that feature's sub-questions
+    instead of asking dead inputs. The returned namespace always has every
+    dest set, so ``build_config`` sees a complete set of values.
+    """
     console = _console()
     ns = Namespace()
     for opt in spec.options:
-        if not opt.prompt:
+        if not opt.prompt or not _gate_satisfied(ns, opt):
             setattr(ns, opt.dest, opt.default)
             continue
         setattr(ns, opt.dest, _prompt_one(console, opt))
     return ns
+
+
+def _gate_satisfied(ns: Namespace, opt: OptionSpec) -> bool:
+    """True when ``opt``'s prompt_when gate holds against answers so far.
+
+    An option with no gate is always prompted. A gate holds only when EVERY
+    (dest, value) condition matches an already-collected answer; a referenced
+    dest missing from the namespace fails closed (skip the prompt).
+    """
+    if opt.prompt_when is None:
+        return True
+    for gate_dest, expected in opt.prompt_when:
+        if not hasattr(ns, gate_dest):
+            return False
+        if getattr(ns, gate_dest) != expected:
+            return False
+    return True
 
 
 def _default_display(opt: OptionSpec) -> str:
