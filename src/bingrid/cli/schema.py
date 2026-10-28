@@ -67,12 +67,32 @@ class OptionSpec:
     bool_style: BoolStyle | None = None
     negative_flag: str | None = None
     prompt: bool = True
+    # Interactive-prompt overrides (optional). ``prompt_label`` is the positive
+    # feature name shown in a BOOL prompt (e.g. "Magnet pockets") so a negative
+    # flag like --no-magnets is never asked as a double negative; ``prompt_help``
+    # is a positive-sense description for the same prompt. Both only affect the
+    # interactive walkthrough; argparse flags/help are unchanged.
+    prompt_label: str | None = None
+    prompt_help: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.flag, str) or not self.flag.startswith("--"):
             raise ValueError(f"OptionSpec flag must start with '--': {self.flag!r}")
         if not isinstance(self.dest, str) or not self.dest:
             raise ValueError(f"OptionSpec dest must be a non-empty str: {self.dest!r}")
+
+        for attr in ("prompt_label", "prompt_help"):
+            value = getattr(self, attr)
+            if value is not None and (not isinstance(value, str) or not value):
+                raise ValueError(
+                    f"OptionSpec {attr} must be a non-empty str or None: {value!r}"
+                )
+        if (self.prompt_label is not None or self.prompt_help is not None) \
+                and self.type is not OptionType.BOOL:
+            raise ValueError(
+                f"OptionSpec {self.flag!r}: prompt_label/prompt_help apply only "
+                f"to BOOL options"
+            )
 
         if self.type is OptionType.CHOICE:
             if not isinstance(self.choices, tuple) or not self.choices:

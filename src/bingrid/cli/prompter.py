@@ -108,6 +108,23 @@ def _pretty_name(flag: str) -> str:
     return flag.lstrip("-").replace("-", " ")
 
 
+def _bool_label(opt: OptionSpec) -> str:
+    """A POSITIVE feature label for a boolean prompt.
+
+    The flag may be negative (``--no-magnets``), so we never prompt the
+    double-negative "no magnets? [Y/n]". The clean label is DATA owned by the
+    schema (``OptionSpec.prompt_label``): e.g. "Magnet pockets", "Stacking
+    lip", "Dovetail connectors". When a spec omits it we fall back to a
+    title-cased dest ("magnets" -> "Magnets").
+    """
+    if opt.prompt_label:
+        return opt.prompt_label
+    phrase = opt.dest.replace("_", " ").strip()
+    if not phrase:
+        return opt.dest
+    return phrase[0].upper() + phrase[1:]
+
+
 def _describe(console, spec: OptionSpec, default_display: str) -> None:
     from rich.text import Text
 
@@ -117,6 +134,47 @@ def _describe(console, spec: OptionSpec, default_display: str) -> None:
     text.append(spec.help, style="dim")
     text.append(f"\n[default: {default_display}]", style="green")
     console.print(text)
+
+
+def _describe_bool(console, opt: OptionSpec) -> None:
+    """Describe a boolean option by its POSITIVE feature, resolved default.
+
+    Avoids echoing a negative flag's "disable ..." help (which inverts the
+    on/off sense) and shows the default as the resolved yes/no, not the raw
+    dest boolean.
+    """
+    from rich.text import Text
+
+    text = Text()
+    text.append(_bool_label(opt), style="bold cyan")
+    text.append("\n")
+    text.append(_bool_help(opt), style="dim")
+    text.append(
+        f"\n[default: {'yes' if bool(opt.default) else 'no'}]", style="green"
+    )
+    console.print(text)
+
+
+def _bool_help(opt: OptionSpec) -> str:
+    """Positive-sense help for a boolean option.
+
+    Prefers an explicit ``OptionSpec.prompt_help`` from the schema. Otherwise
+    falls back to the argparse ``help``, rephrasing a NEGATIVE_OFF flag's
+    disable-sense help ("disable magnet pockets" -> "include magnet pockets")
+    so it matches the positive question. PAIR/POSITIVE_ON help already reads
+    positively.
+    """
+    from .schema import BoolStyle
+
+    if opt.prompt_help:
+        return opt.prompt_help
+    if opt.bool_style is BoolStyle.NEGATIVE_OFF:
+        stripped = opt.help.strip()
+        low = stripped.lower()
+        for verb in ("disable ", "omit "):
+            if low.startswith(verb):
+                return f"include {stripped[len(verb):]}"
+    return opt.help
 
 
 # --- public API ------------------------------------------------------------
@@ -174,8 +232,8 @@ def _default_display(opt: OptionSpec) -> str:
 
 def _prompt_one(console, opt: OptionSpec) -> Any:
     if opt.type is OptionType.BOOL:
-        _describe(console, opt, _default_display(opt))
-        return _ask_bool(_pretty_name(opt.flag), bool(opt.default))
+        _describe_bool(console, opt)
+        return _ask_bool(_bool_label(opt), bool(opt.default))
 
     if opt.type is OptionType.CHOICE:
         _describe(console, opt, _default_display(opt))

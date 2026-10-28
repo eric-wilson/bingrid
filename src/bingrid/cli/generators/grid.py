@@ -85,6 +85,8 @@ OPTIONS = (
         "magnets", "--no-magnets", OptionType.BOOL,
         "disable magnet pockets", default=True,
         bool_style=BoolStyle.NEGATIVE_OFF,
+        prompt_label="Magnet pockets",
+        prompt_help="recess magnet pockets into the plate",
     ),
     OptionSpec(
         "magnet_diameter", "--magnet-diameter", OptionType.FLOAT,
@@ -123,6 +125,8 @@ OPTIONS = (
         "connectors", "--connectors", OptionType.BOOL,
         "add dovetail connectors for tiling frames together", default=False,
         bool_style=BoolStyle.POSITIVE_ON,
+        prompt_label="Dovetail connectors",
+        prompt_help="add dovetail connectors for tiling frames together",
     ),
     OptionSpec(
         "connector_width", "--connector-width", OptionType.FLOAT,

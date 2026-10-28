@@ -76,6 +76,8 @@ OPTIONS = (
         "stacking_lip", "--stacking-lip", OptionType.BOOL,
         "build the stacking lip (default: on)", default=True,
         bool_style=BoolStyle.PAIR, negative_flag="--no-stacking-lip",
+        prompt_label="Stacking lip",
+        prompt_help="build the stacking lip on top of the bin",
     ),
     OptionSpec(
         "lip_clearance", "--lip-clearance", OptionType.FLOAT,
@@ -96,12 +98,17 @@ OPTIONS = (
         "split_lip", "--split-lip", OptionType.BOOL,
         "export the body and lip as separate STL meshes", default=False,
         bool_style=BoolStyle.POSITIVE_ON,
+        prompt_label="Split body/lip STLs",
+        prompt_help="export the body and lip as separate STL meshes",
     ),
     OptionSpec(
         "three_mf", "--3mf", OptionType.BOOL,
         "export the body and lip as two named bodies in one .3mf file "
         "(single-file two-color alternative to --split-lip)",
         default=False, bool_style=BoolStyle.POSITIVE_ON,
+        prompt_label="Two-body .3mf",
+        prompt_help="export the body and lip as two named bodies in one .3mf "
+                    "file (single-file two-color alternative to split STLs)",
     ),
     # color band group
     OptionSpec(
@@ -111,6 +118,10 @@ OPTIONS = (
         "colored rim, one color change near the top. Requires a stacking "
         "lip unless --color-band is given",
         default=False, bool_style=BoolStyle.POSITIVE_ON,
+        prompt_label="Painted two-color .3mf",
+        prompt_help="export one painted mesh (Bambu paint_color .3mf): the "
+                    "stacking lip painted to filament 2 for a two-tone print. "
+                    "Needs a stacking lip unless the color band is on",
     ),
     OptionSpec(
         "color_band", "--color-band", OptionType.BOOL,
@@ -118,6 +129,9 @@ OPTIONS = (
         "of the stacking lip (uses --color-band-start / "
         "--color-band-height); no lip required",
         default=False, bool_style=BoolStyle.POSITIVE_ON,
+        prompt_label="Mid-wall color band",
+        prompt_help="with painted .3mf, paint a mid-wall horizontal band "
+                    "instead of the lip (no stacking lip required)",
     ),
     OptionSpec(
         "color_band_start", "--color-band-start", OptionType.FLOAT,
